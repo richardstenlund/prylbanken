@@ -40,3 +40,22 @@ test("text file classification and language detection", () => {
   assert.equal(tools.language("server.py"), "python");
   assert.equal(tools.language("notes.txt"), "plain");
 });
+test("review reminders use calendar months and clamp month end in UTC", () => {
+  const row = {created:"2026-01-31 12:00:00", review_months:"1"};
+  assert.deepEqual(tools.reviewDue(row, new Date("2026-02-27T23:59:59Z")), {date:"2026-02-28",due:false});
+  assert.deepEqual(tools.reviewDue(row, new Date("2026-02-28T00:00:00Z")), {date:"2026-02-28",due:true});
+  assert.equal(tools.reviewDue({...row,reviewed_at:"2026-03-01"}).date,"2026-04-01");
+  assert.equal(tools.reviewDue({created:"2026-10-04 01:00:00"}).date,"2027-04-04");
+  assert.throws(() => tools.reviewDue({...row,review_months:"0"}));
+});
+
+test("line diff precisely preserves both versions including blank lines", () => {
+  for (const [before,after] of [["a\nb\n","a\nc\n"],["","x"],["x",""],["same\n","same\n"],
+    ["a\nb\nc","b\nc\na"], ["<script>\n \n","<img>\n\n"]]) {
+    const result = tools.lineDiff(before,after);
+    assert.equal(result.filter(row => row.kind !== "add").map(row => row.text).join("\n"),before);
+    assert.equal(result.filter(row => row.kind !== "remove").map(row => row.text).join("\n"),after);
+  }
+  assert.throws(() => tools.lineDiff(Array(1100).fill("a").join("\n"),Array(1100).fill("b").join("\n")));
+  assert.throws(() => tools.lineDiff("\n".repeat(10001),"\n".repeat(10001)));
+});

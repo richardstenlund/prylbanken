@@ -17,7 +17,8 @@ function currentFilters() {
   return {query:$("#search").value, category:active, tags:$("#filter-tags").value,
     descendants:$("#filter-descendants").checked, attachments:$("#filter-attachments").checked,
     project:$("#filter-project").value, os:$("#filter-os").value, language:$("#filter-language").value,
-    status:$("#filter-status").value, sort:$("#sort").value};
+    status:$("#filter-status").value, sort:$("#sort").value,
+    personal:$("#filter-personal").checked, review:$("#filter-review").checked};
 }
 function refreshLibraryTools(loadedProjects, loadedSearches) {
   projects = loadedProjects; savedSearches = loadedSearches;
@@ -38,6 +39,7 @@ function populateProjectChoices(item) {
   });
 }
 function appendItemTools(body, item) {
+  appendWorkbenchTools(body, item);
   if (item.project_ids?.length) {
     const memberships = el("div", "project-memberships");
     item.project_ids.forEach(id => {
@@ -62,7 +64,7 @@ function appendItemTools(body, item) {
   const error = el("p", "error"); error.hidden = true; error.setAttribute("role", "alert");
   const output = document.createElement("textarea");
   output.readOnly = true; output.rows = 8; output.setAttribute("aria-label", "Genererat kommando"); output.spellcheck = false;
-  const copyButton = action("Kopiera genererat kommando", "secondary", () => copy(output.value));
+  const copyButton = action("Kopiera genererat kommando", "secondary", () => copy(output.value, item));
   const downloadButton = action("Ladda ned genererad text", "secondary", () => downloadText({...item, content:output.value}));
   copyButton.disabled = true; downloadButton.disabled = true;
   const generate = action("Generera kommando", "primary", () => {
@@ -105,9 +107,10 @@ async function showProjects() {
     $("#project-list").replaceChildren();
     projects.forEach(project => {
       const row = el("article", "project-row");
+      const exportLink = action("Ladda ned projekt som ZIP", "secondary", () => downloadProject(project, exportLink));
       row.append(action(project.name, "title-button", () => {
         active = "all"; $("#filter-project").value = String(project.id); $("#projects-dialog").close(); render();
-      }), el("p", "muted", project.description));
+      }), el("p", "muted", project.description), exportLink);
       if (canEdit()) {
         const name = document.createElement("input"); name.value = project.name; name.maxLength = 80;
         const description = document.createElement("textarea"); description.value = project.description; description.maxLength = 2000;
@@ -238,7 +241,8 @@ searchSelect.addEventListener("change", () => {
     }
     input.value = filters[key];
   });
-  descendants.checked = filters.descendants; attachmentsOnly.checked = filters.attachments; render();
+  descendants.checked = filters.descendants; attachmentsOnly.checked = filters.attachments;
+  $("#filter-personal").checked = Boolean(filters.personal); $("#filter-review").checked = Boolean(filters.review); render();
 });
 
 const projectButton = action("Projektsamlingar", "secondary", () => { $("#projects-dialog").showModal(); showProjects(); });
@@ -317,4 +321,3 @@ $("#batch-save").addEventListener("click", async () => {
 });
 $("#batch-dialog").addEventListener("close", clearBatchPreview);
 window.addEventListener("hashchange", () => { if (currentUser) openCapturedBookmark(); });
-boot();

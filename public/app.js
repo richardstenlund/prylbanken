@@ -1,7 +1,7 @@
 "use strict";
 const $ = (selector) => document.querySelector(selector);
 const builtInCategories = [
-  ["all", "Allt innehåll", "▦"], ["favorites", "Favoriter", "☆"],
+  ["all", "Allt innehåll", "▦"], ["favorites", "Gemensamma favoriter", "☆"],
   ["lankar", "Länkar", "↗"], ["kod", "Kodsnuttar", "⌘"],
   ["docker", "Docker", "▣"], ["spelserver", "Spelservrar", "◈"],
   ["steamcmd", "SteamCMD", "›_"], ["bat", "BAT & skript", "▤"],
@@ -56,7 +56,7 @@ async function loadHistory() {
         $("#history-preview").replaceChildren(
           el("h3", "", snapshot.title || "Namnlös version"),
           codeBlock(snapshot.content || "", snapshot.language || "plain", true, "detail-code"),
-          action("Kopiera version", "secondary", () => copy(snapshot.content || "")),
+          action("Kopiera version", "secondary", () => copy(snapshot.content || "", snapshot)),
           action("Återställ den här versionen", "primary", async () => {
             if (!confirm(`Återställa versionen "${snapshot.title || "Namnlös version"}" från ${formatDate(snapshot.created)}? Nuvarande innehåll blir en version i historiken.`)) return;
             preview.disabled = true;
@@ -76,6 +76,7 @@ async function loadHistory() {
       row.append(info, preview);
       $("#history-list").append(row);
     });
+    appendHistoryComparison();
   } catch (error) { showError(error, $("#history-error")); }
 }
 async function loadTrash() {
@@ -299,8 +300,8 @@ async function api(path, method = "GET", body) {
 async function load() {
   $("#error").hidden = true;
   try {
-    const [loadedItems, loadedCategories, loadedProjects, loadedSearches] = await Promise.all([
-      api("/api/items"), api("/api/categories"), api("/api/projects"), api("/api/searches")]);
+    const [loadedItems, loadedCategories, loadedProjects, loadedSearches, personal] = await Promise.all([
+      api("/api/items"), api("/api/categories"), api("/api/projects"), api("/api/searches"), api("/api/personal")]);
     items = loadedItems;
     categories = builtInCategories.slice(0, 2);
     const categoryData = loadedCategories.filter(category => !["all", "favorites"].includes(category.key)).map(category => {
@@ -313,6 +314,7 @@ async function load() {
     });
     if (!categories.some(category => category[0] === active)) active = "all";
     refreshLibraryTools(loadedProjects, loadedSearches);
+    refreshPersonal(personal);
     loading = false; populateFilters(); render();
   }
   catch (error) { showError(error); }
@@ -320,7 +322,7 @@ async function load() {
 function filtered() {
   const filters = currentFilters();
   const keys = filters.descendants ? categoryDescendants(active) : new Set([active]);
-  return items.filter(item => LibraryTools.matches(item, filters, keys)).sort((a, b) => {
+  return items.filter(item => LibraryTools.matches(item, filters, keys) && workbenchMatches(item)).sort((a, b) => {
     if ($("#sort").value === "title") return a.title.localeCompare(b.title, "sv");
     const order = a.updated.localeCompare(b.updated) || a.id - b.id;
     return $("#sort").value === "old" ? order : b.favorite - a.favorite || -order;
@@ -457,6 +459,7 @@ function render() {
   const visible = filtered();
   $("#result-count").textContent = `${visible.length} ${visible.length === 1 ? "sak" : "saker"}`;
   $("#cards").replaceChildren(...visible.map(card));
+  renderDashboard();
   $("#empty").hidden = loading || visible.length > 0;
   const first = items.length === 0;
   $("#empty-title").textContent = first ? "Här börjar din samling." : "Inga träffar den här gången.";
@@ -481,13 +484,15 @@ function formatSize(size) {
 function card(item) {
   const node = el("article", "card");
   const top = el("div", "card-top");
+  appendPersonalFavorite(top, item);
   const favorite = action(item.favorite ? "★" : "☆", `icon-button${item.favorite ? " selected" : ""}`, async () => {
     favorite.disabled = true;
     try { await api(`/api/items/${item.id}`, "PUT", {...item, favorite: !item.favorite}); await load(); }
     catch (error) { showError(error); }
     finally { favorite.disabled = false; }
   });
-  favorite.setAttribute("aria-label", item.favorite ? "Ta bort favorit" : "Markera som favorit");
+  favorite.setAttribute("aria-label", item.favorite ? "Ta bort gemensam favorit" : "Markera som gemensam favorit");
+  favorite.title = "Gemensam favorit för biblioteket";
   favorite.setAttribute("aria-pressed", String(Boolean(item.favorite)));
   favorite.disabled = !canEdit();
   top.append(el("span", `category-badge ${item.category}`, categoryName(item.category)), favorite);
@@ -500,6 +505,7 @@ function card(item) {
   }
   const metadata = metadataSummary(item);
   if (metadata) node.append(el("p", "metadata-summary", metadata));
+  node.append(riskBadge(item));
   if (item.notes) node.append(el("p", "card-notes", item.notes));
   if (item.filename !== null) node.append(fileLink(item));
   const tags = el("div", "tags");
@@ -513,7 +519,7 @@ function card(item) {
     link.href = item.content; link.target = "_blank"; link.rel = "noopener noreferrer";
     actions.append(link);
   } else if (item.content) {
-    actions.append(action("Kopiera", "small-button", () => copy(item.content)));
+    actions.append(action("Kopiera", "small-button", () => copy(item.content, item)));
     actions.append(action("↓ Text", "small-button", () => downloadText(item)));
   }
   if (canEdit()) actions.append(action("Redigera", "small-button", () => openEditor(item)));
@@ -529,7 +535,8 @@ function card(item) {
   bottom.append(actions); node.append(tags, bottom);
   return node;
 }
-async function copy(text) {
+async function copy(text, item = null) {
+  if (item && !confirmRisk(item)) return;
   try {
     if (!navigator.clipboard || !window.isSecureContext) {
       throw new Error("Direktkopiering kräver HTTPS eller localhost. Öppna posten och kopiera texten manuellt.");
@@ -543,6 +550,7 @@ function openEditor(item = null) {
   form.reset();
   populateCategories();
   populateProjectChoices(item);
+  populateWorkbenchEditor(item);
   $("#form-error").hidden = true;
   $("#editor-title").textContent = item ? "Redigera sparad sak" : "Lägg till nytt";
   ["title", "download_name", "category", "content", "notes", "tags", "language", "os",
@@ -571,7 +579,7 @@ function showDetail(item) {
   body.replaceChildren();
   if (item.content) {
     body.append(codeBlock(item.content, item.language || "plain", true, "detail-code"));
-    body.append(action("Kopiera innehåll", "secondary", () => copy(item.content)));
+    body.append(action("Kopiera innehåll", "secondary", () => copy(item.content, item)));
     body.append(action("↓ Ladda ned text", "secondary", () => downloadText(item)));
   }
   const metadata = metadataSummary(item);
@@ -598,6 +606,7 @@ form.addEventListener("submit", async event => {
       "os", "program_version", "ports", "dependencies", "tested_at", "status"].map(name => [name, form.elements[name].value]));
     payload.favorite = form.elements.favorite.checked;
     payload.project_ids = [...$("#editor-projects").querySelectorAll("input:checked")].map(input => Number(input.value));
+    Object.assign(payload, workbenchEditorPayload());
     const file = $("#attachment").files[0];
     if (file) {
       if (file.size > 20 * 1024 * 1024) throw new Error("Filen får vara högst 20 MB.");

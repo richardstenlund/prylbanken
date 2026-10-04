@@ -17,6 +17,7 @@ from catalog import PACKS, EXAMPLES
 from backend import (DB_LOCK, METADATA, BUILTINS, Backups, audit, snapshot, migrate, metadata,
                      category_payload, restore_example_key)
 from library import ROLES, named, attachments, fingerprint, project_ids, search_filters
+import workbench
 
 ROOT = Path(__file__).parent
 DATA = Path(os.environ.get("DATA_DIR", str(ROOT / "data")))
@@ -116,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; script-src 'self'; style-src 'self'; "
-                         "img-src 'self' data:; object-src 'none'; base-uri 'none'; "
+                         "img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; "
                          "frame-ancestors 'none'; form-action 'self'")
         for key, value in (headers or {}).items():
             self.send_header(key, value)
@@ -161,7 +162,9 @@ class Handler(BaseHTTPRequestHandler):
         if role != "admin" and admin:
             self.reply(403, {"error": "Administratörsbehörighet krävs."})
             return False
-        personal = path.startswith("/api/searches") or path in ("/api/password", "/api/logout")
+        personal = (path.startswith(("/api/searches", "/api/personal/")) or
+                    bool(re.fullmatch(r"/api/guides/\d+/progress", path)) or
+                    path in ("/api/password", "/api/logout"))
         if method != "GET" and role == "reader" and not personal:
             self.reply(403, {"error": "Läsare kan inte ändra det gemensamma biblioteket."})
             return False
@@ -205,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def get(self):
         path = urlsplit(self.path).path
-        if path in ("/", "/login", "/app.js", "/features.js", "/library-tools.js", "/login.js", "/style.css"):
+        if path in ("/", "/login", "/app.js", "/features.js", "/workbench.js", "/library-tools.js", "/login.js", "/style.css"):
             if path == "/" and not self.session():
                 self.reply(303, "", headers={"Location": "/login"})
                 return
@@ -214,6 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                               "/login.js": ("login.js", "text/javascript; charset=utf-8"),
                               "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                               "/features.js": ("features.js", "text/javascript; charset=utf-8"),
+                              "/workbench.js": ("workbench.js", "text/javascript; charset=utf-8"),
                               "/library-tools.js": ("library-tools.js", "text/javascript; charset=utf-8"),
                               "/style.css": ("style.css", "text/css; charset=utf-8")}[path]
             self.reply(200, (ROOT / "public" / filename).read_bytes(), mime)
@@ -244,6 +248,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/me":
                 self.reply(200, self.public_user())
                 return
+            if workbench.get(self, db, path):
+                return
             if path == "/api/users":
                 rows = db.execute("SELECT id,username,created,active,role FROM users ORDER BY username").fetchall()
                 self.reply(200, [{**dict(row), "active": bool(row["active"])} for row in rows])
@@ -271,9 +277,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not db.execute("SELECT 1 FROM items WHERE id=?", (item_id,)).fetchone():
                     self.reply(404, {"error": "Posten finns inte längre."})
                     return
-                self.reply(200, [dict(row) for row in db.execute(
-                    "SELECT id,created,actor,title,content,language FROM history WHERE item_id=? ORDER BY id DESC",
-                    (item_id,))])
+                self.reply(200, [{**{key: row[key] for key in ("id", "created", "actor", "title", "content", "language")},
+                                 "risk": json.loads(row["snapshot"]).get("risk", "unclassified")} for row in db.execute(
+                    "SELECT id,created,actor,title,content,language,snapshot FROM history WHERE item_id=? ORDER BY id DESC", (item_id,))])
                 return
             if path == "/api/examples":
                 self.reply(200, {"packs": [{**pack, "count": sum(item["pack"] == pack["id"] for item in EXAMPLES)}
@@ -283,19 +289,23 @@ class Handler(BaseHTTPRequestHandler):
                 condition = "deleted_at IS NULL" if path == "/api/items" else "deleted_at IS NOT NULL"
                 rows = db.execute(
                     "SELECT id,title,category,content,notes,tags,favorite,filename,"
-                    "length(filedata) AS filesize,created,updated,deleted_at,project_ids," + ",".join(METADATA) + " FROM items WHERE " + condition + " "
+                    "length(filedata) AS filesize,created,updated,deleted_at,project_ids,related_ids," + ",".join(METADATA) + " FROM items WHERE " + condition + " "
                     "ORDER BY favorite DESC,updated DESC,id DESC").fetchall()
-                self.reply(200, [{**dict(row), "project_ids": json.loads(row["project_ids"])} for row in rows])
+                self.reply(200, [{**dict(row), "project_ids": json.loads(row["project_ids"]),
+                                 "related_ids": json.loads(row["related_ids"])} for row in rows])
                 return
             if path == "/api/backup":
                 rows = []
                 for row in db.execute("SELECT * FROM items WHERE deleted_at IS NULL ORDER BY id"):
                     item = dict(row)
                     item["project_ids"] = json.loads(item["project_ids"])
+                    item["related_ids"] = json.loads(item["related_ids"])
                     item["filedata"] = base64.b64encode(item["filedata"]).decode() if item["filedata"] is not None else None
                     rows.append(item)
                 self.reply(200, {"version": 1, "items": rows,
-                                "projects": [dict(row) for row in db.execute("SELECT * FROM projects ORDER BY id")]},
+                                "projects": [dict(row) for row in db.execute("SELECT * FROM projects ORDER BY id")],
+                                "guides": [{**dict(row), "steps": json.loads(row["steps"])}
+                                           for row in db.execute("SELECT * FROM guides ORDER BY id")]},
                            headers={"Content-Disposition": 'attachment; filename="prylbanken-backup.json"'})
                 return
             if path.startswith("/api/files/") and path.removeprefix("/api/files/").isdigit():
@@ -380,6 +390,8 @@ class Handler(BaseHTTPRequestHandler):
                            headers={"Set-Cookie": self.session_cookie("", 0)})
                 return
             with connect() as db:
+                if workbench.mutate(self, db, method, path):
+                    return
                 if self.manage(db, method, path):
                     return
                 if self.library_management(db, method, path):
@@ -459,6 +471,7 @@ class Handler(BaseHTTPRequestHandler):
                         cursor = db.execute("INSERT INTO projects(name,description) VALUES (?,?)", (name, description))
                         project_map[old_id] = cursor.lastrowid
                     added = skipped = 0
+                    item_map, pending_relations, seen_ids, missing_links = {}, [], set(), 0
                     example_keys = {example["key"] for example in EXAMPLES}
                     for item in payload["items"]:
                         if not isinstance(item, dict):
@@ -470,17 +483,56 @@ class Handler(BaseHTTPRequestHandler):
                         key = item.get("example_key")
                         if key is not None and (not isinstance(key, str) or key not in example_keys):
                             raise ValueError("Ogiltig exempelnyckel i säkerhetskopian.")
+                        old_id = item.get("id")
+                        if old_id is not None:
+                            if type(old_id) is not int or old_id < 1 or old_id in seen_ids:
+                                raise ValueError("Ogiltiga eller upprepade post-ID i importen.")
+                            seen_ids.add(old_id)
                         if key and db.execute("SELECT 1 FROM items WHERE example_key=?", (key,)).fetchone():
+                            if type(item.get("id")) is int:
+                                item_map[item["id"]] = db.execute("SELECT id FROM items WHERE example_key=?", (key,)).fetchone()["id"]
                             skipped += 1
                             continue
-                        item_id = self.save(db, item)
+                        relations = item.get("related_ids", [])
+                        if (not isinstance(relations, list) or len(relations) > 50 or
+                                any(type(i) is not int or i < 1 for i in relations) or len(set(relations)) != len(relations)):
+                            raise ValueError("Ogiltiga relationer i importen.")
+                        item_id = self.save(db, {**item, "related_ids": []})
+                        if old_id is not None:
+                            item_map[old_id] = item_id
+                        pending_relations.append((item_id, relations))
                         if key:
                             db.execute("UPDATE items SET example_key=? WHERE id=?", (key, item_id))
                             snapshot(db, item_id, self.user["username"])
                         added += 1
+                    for item_id, relations in pending_relations:
+                        missing_links += sum(i not in item_map for i in relations)
+                        mapped = list(dict.fromkeys(item_map[i] for i in relations if i in item_map and item_map[i] != item_id))
+                        db.execute("UPDATE items SET related_ids=? WHERE id=?", (json.dumps(mapped), item_id))
+                        snapshot(db, item_id, self.user["username"])
+                    guides = payload.get("guides", [])
+                    if not isinstance(guides, list) or len(guides) + db.execute("SELECT COUNT(*) FROM guides").fetchone()[0] > 200:
+                        raise ValueError("Högst 200 guider.")
+                    for guide in guides:
+                        if not isinstance(guide, dict) or not isinstance(guide.get("steps"), list):
+                            raise ValueError("Ogiltig guide i importen.")
+                        steps = []
+                        for step in guide["steps"]:
+                            if not isinstance(step, dict):
+                                raise ValueError("Ogiltigt guidesteg.")
+                            source_id = step.get("item_id")
+                            if source_id is not None and type(source_id) is not int:
+                                raise ValueError("Ogiltig postlänk i guidesteg.")
+                            if source_id is not None and source_id not in item_map:
+                                missing_links += 1
+                            steps.append({"text": step.get("text"), "item_id": item_map.get(source_id)})
+                        values = workbench.guide_payload(db, {**guide, "steps": steps})
+                        db.execute("INSERT INTO guides(title,description,prerequisites,steps) VALUES (?,?,?,?)",
+                                   tuple(values.values()))
                     audit(db, self.user["username"], "items.import", f"{added} added, {skipped} skipped")
                     db.commit()
-                    self.reply(201, {"message": f'{added} poster importerade.', "added": added, "skipped": skipped})
+                    warning = f" {missing_links} länkar saknade mål i importfilen och kunde inte kopplas." if missing_links else ""
+                    self.reply(201, {"message": f'{added} poster importerade.' + warning, "added": added, "skipped": skipped})
                     return
                 if method == "POST" and path == "/api/items":
                     item_id = self.save(db, self.read_json())
@@ -620,6 +672,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(404, {"error": "Posten finns inte i papperskorgen." if not history_match else "Posten finns inte."})
                 return True
             if trash_match:
+                db.execute("DELETE FROM personal_items WHERE item_id=?", (item_id,))
                 db.execute("DELETE FROM history WHERE item_id=?", (item_id,))
                 db.execute("DELETE FROM items WHERE id=?", (item_id,))
                 action = "item.delete-permanently"
@@ -816,6 +869,7 @@ class Handler(BaseHTTPRequestHandler):
         values = validate(payload)
         values.update(metadata(payload, old))
         values["project_ids"] = project_ids(db, payload, old, restoring)
+        values["related_ids"] = workbench.related_ids(db, payload, old, restoring)
         if not db.execute("SELECT 1 FROM categories WHERE key=?", (values["category"],)).fetchone():
             # Preserve compatibility with old exports and the legacy custom-category editor.
             db.execute("INSERT INTO categories(key,name) VALUES (?,?)", (values["category"], values["category"]))
@@ -826,8 +880,13 @@ class Handler(BaseHTTPRequestHandler):
         actor = self.user["username"]
         columns = list(values)
         if item_id is None:
-            cursor = db.execute(f"INSERT INTO items ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
-                                list(values.values()))
+            sequence = db.execute("SELECT value FROM settings WHERE key='item_sequence'").fetchone()
+            maximum = db.execute("SELECT COALESCE(MAX(id),0) FROM items").fetchone()[0]
+            new_id = max(maximum, int(sequence["value"]) if sequence else 0) + 1
+            db.execute("INSERT INTO settings(key,value) VALUES ('item_sequence',?) "
+                       "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(new_id),))
+            cursor = db.execute(f"INSERT INTO items (id,{','.join(columns)}) VALUES (?,{','.join('?' for _ in columns)})",
+                                [new_id, *values.values()])
             snapshot(db, cursor.lastrowid, actor)
             audit(db, actor, "item.create", cursor.lastrowid)
             return cursor.lastrowid

@@ -20,6 +20,7 @@ METADATA = {
     "language": ("plain", 20), "download_name": ("", 255), "os": ("", 200),
     "program_version": ("", 200), "ports": ("", 1000), "dependencies": ("", 5000),
     "tested_at": ("", 10), "status": ("template", 20),
+    "risk": ("unclassified", 20), "review_months": ("6", 3), "reviewed_at": ("", 10),
 }
 BUILTINS = {
     "lankar": "Länkar", "kod": "Kodsnuttar", "docker": "Docker",
@@ -30,7 +31,7 @@ BUILTINS = {
     "proxmox": "Proxmox VE",
 }
 ITEM_FIELDS = ("title", "category", "content", "notes", "tags", "favorite", "filename",
-               "filedata", "example_key", "project_ids", *METADATA)
+               "filedata", "example_key", "project_ids", "related_ids", *METADATA)
 
 
 def audit(db, actor, action, target):
@@ -42,6 +43,7 @@ def snapshot(db, item_id, actor):
     row = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
     data = {field: row[field] for field in ITEM_FIELDS}
     data["project_ids"] = json.loads(data["project_ids"])
+    data["related_ids"] = json.loads(data["related_ids"])
     if data["filedata"] is not None:
         data["filedata"] = base64.b64encode(data["filedata"]).decode("ascii")
     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True)
@@ -53,6 +55,8 @@ def snapshot(db, item_id, actor):
 
 
 def migrate(db):
+    from workbench import migrate as migrate_workbench
+    migrate_workbench(db)
     columns = {r["name"] for r in db.execute("PRAGMA table_info(items)")}
     for field, (default, _) in METADATA.items():
         if field not in columns:
@@ -88,6 +92,7 @@ def migrate(db):
         id INTEGER PRIMARY KEY,created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         actor TEXT NOT NULL,action TEXT NOT NULL,target TEXT NOT NULL)""")
     db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+    db.execute("INSERT OR IGNORE INTO settings(key,value) SELECT 'item_sequence',COALESCE(MAX(id),0) FROM items")
     db.execute("INSERT OR IGNORE INTO settings VALUES ('registration_open','true')")
     db.execute("INSERT OR IGNORE INTO categories(key,name) VALUES ('proxmox','Proxmox VE')")
     seeded = db.execute("SELECT value FROM settings WHERE key='categories_seeded'").fetchone()
@@ -124,13 +129,18 @@ def metadata(payload, old=None):
         raise ValueError("Ogiltigt skriptspråk.")
     if result["status"] not in {"template", "tested", "needs-update"}:
         raise ValueError("Ogiltig teststatus.")
-    date = result["tested_at"]
-    if date:
-        try:
-            if dt.date.fromisoformat(date).isoformat() != date:
-                raise ValueError()
-        except ValueError:
-            raise ValueError("Testdatum måste vara ett ISO-datum (ÅÅÅÅ-MM-DD).")
+    if result["risk"] not in {"unclassified", "read", "change", "outage", "destructive"}:
+        raise ValueError("Ogiltig riskklass.")
+    if not re.fullmatch(r"[1-9]\d{0,2}", result["review_months"]) or int(result["review_months"]) > 120:
+        raise ValueError("Granskningsintervallet måste vara 1–120 månader.")
+    for field in ("tested_at", "reviewed_at"):
+        date = result[field]
+        if date:
+            try:
+                if dt.date.fromisoformat(date).isoformat() != date:
+                    raise ValueError()
+            except ValueError:
+                raise ValueError("Datum måste vara ett ISO-datum (ÅÅÅÅ-MM-DD).")
     name = result["download_name"]
     if "/" in name or "\\" in name or name in {".", ".."}:
         raise ValueError("Nedladdningsnamnet får inte innehålla en sökväg.")

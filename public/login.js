@@ -98,4 +98,6 @@ form.addEventListener("submit", async event => {
     button.textContent = "Logga in →";
   }
 });
+button.disabled = false;
+document.querySelector("#register-button").disabled = false;
 loadRegistrationAvailability();

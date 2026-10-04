@@ -61,6 +61,51 @@ och ladda ned bilagor. Begränsa därför öppen registrering till betrodda anv�
   standard, men kan tillåtas uttryckligen. Poster i papperskorgen räknas inte
   som dubbletter. Ogiltig post avbryter hela importen.
 
+### Personlig startsida och arbetsverktyg
+
+- **Min startsida** visar dina senast öppnade poster (högst 100), personliga
+  favoriter, poster som behöver granskas och projektsamlingar. Hjärtat är din
+  privata favorit; stjärnan och kategorin **Gemensamma favoriter** behåller
+  bibliotekets gemensamma markeringar. Även läsare kan spara egna favoriter.
+  Filtren **Mina favoriter** och **Behöver granskas** kan ingå i sparade sökningar.
+- **Checklistor & guider** innehåller gemensamma steg-för-steg-instruktioner med
+  förberedelser och valfria länkar till kommandon/filer. Redigerare och
+  administratörer kan skapa, ordna och ändra upp till 200 guider med 100 steg
+  vardera. Alla roller kan bocka av steg, privat för sitt konto. Ändras ett stegs
+  instruktion eller länk nollställs just det stegets avbockning. Om en länkad post
+  tas bort visas den som otillgänglig; inget kommando körs av sidan.
+- **Granskning:** standardintervallet är sex kalendermånader; det kan ändras till
+  1–120 månader per post. Beräkningen använder senast granskad, annars testdatum,
+  annars skapelsedatum. Månadsslut justeras till sista dagen i målmånaden (UTC).
+  **Markera granskad idag** flyttar nästa påminnelse utan att hävda att kommandot
+  har körtestats. Påminnelser visas endast på sidan, inte via e-post.
+- **Versionsjämförelse:** öppna Historik, välj två versioner och jämför kodtexten
+  rad för rad. Plus/minus och radnummer visar tillagda/borttagna rader. Metadata
+  och bilagor ingår inte i radjämförelsen. Mycket stora förändringar hänvisas
+  uttryckligen till lokal jämförelse i stället för att låsa webbläsaren.
+- **Förhandsvisa bilaga:** UTF-8-text upp till 2 MB och PNG/JPEG/GIF/WebP upp till
+  10 MB visas i en dialog. HTML, SVG och skript visas högst som text, aldrig som
+  aktivt innehåll. Andra format och större filer kan laddas ned som tidigare.
+- **Projekt-ZIP:** välj Projektsamlingar → Ladda ned projekt som ZIP.
+  Exporten innehåller posternas originaltext, anteckningar, bilagor, risker,
+  innehållsförteckning och en importerbar `library.json`. Gränsen är 5000 poster
+  och 50 MB rådata. Gemensamma guider är inte knutna till projekt och följer
+  i stället med full biblioteks-JSON-export. Relationer till poster som saknas
+  i importfilen kan inte återskapas; importen rapporterar antalet saknade mål.
+- **Relationer:** länka upp till 50 andra poster som relaterat innehåll eller
+  förutsättningar i redigeringsformuläret. Relationerna följer versionshistorik
+  och JSON-export/import. Post-ID återanvänds inte när poster raderas permanent.
+- **Riskklass:** välj Läsande, Ändrar systemet, Driftavbrott, Raderar data eller
+  Ej riskklassad. Riskbedömningen är manuell, ingen automatisk säkerhetsgaranti.
+  Kopiering av annat än läsande poster kräver extra bekräftelse, även för
+  genererade mallkommandon och historiska versioner. Tidigare poster blir
+  Ej riskklassad vid uppgradering, utan att deras innehåll ändras.
+
+Inloggningen använder användarnamn och lösenord, utan tvåfaktor. För den avsedda
+VPN-installationen ska webbporten inte exponeras publikt. Fullständiga SQLite-
+backuper innehåller konton, privata favoriter och avbockningar och måste skyddas.
+Biblioteks-JSON/ZIP innehåller inga konton eller privata markeringar.
+
 ### Säkerhetskopiering och återställning
 
 Automatiska fullständiga SQLite-säkerhetskopior tas dagligen i en **separat

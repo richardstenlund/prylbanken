@@ -62,7 +62,8 @@ class ServerTests(unittest.TestCase):
             db.execute("DELETE FROM login_attempts")
             db.execute("DELETE FROM registration_attempts")
             db.execute("DELETE FROM users WHERE username != 'admin'")
-            for table in ("history", "activity", "projects", "saved_searches"):
+            for table in ("history", "activity", "projects", "saved_searches", "guides", "guide_progress",
+                          "personal_items"):
                 db.execute(f"DELETE FROM {table}")
         status, body, headers = self.request("POST", "/api/login",
                                             {"username": "admin", "password": "integration-test-password"}, auth=False)

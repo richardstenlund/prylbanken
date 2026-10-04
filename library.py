@@ -65,7 +65,7 @@ def search_filters(payload):
         if not isinstance(value, str) or len(value) > maximum:
             raise ValueError(f"Ogiltigt sökfilter: {key}.")
         result[key] = value
-    for key in ("descendants", "attachments"):
+    for key in ("descendants", "attachments", "personal", "review"):
         value = payload.get(key, False)
         if not isinstance(value, bool):
             raise ValueError(f"Ogiltigt sökfilter: {key}.")
