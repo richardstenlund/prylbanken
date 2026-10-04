@@ -4,6 +4,122 @@ En svensk, självhostad samlingssida för länkar, kodsnuttar, Docker-kommandon,
 spelservrar, SteamCMD, BAT-skript och bifogade filer. Responsiv layout, sökning,
 taggar, favoriter, redigering och säkerhetskopiering ingår.
 
+**För hemmalabb och betrodda nätverk/VPN.** Biblioteket delas av alla konton.
+Prylbanken sparar dina kommandon men kör dem aldrig på dina servrar.
+
+![Prylbankens bibliotek med sökning, kategorier och serverfilter](docs/images/library.png)
+
+## Kom igång
+
+### 1. Installera på din Docker-host
+
+Du behöver en Linux-server med **Docker Engine**, **Docker Compose v2**
+(med stöd för `--wait`) och **Git**. Kontrollera först:
+
+```sh
+docker info
+docker compose version
+git --version
+```
+
+Kör sedan i terminalen **på servern**, inte i containern:
+
+```sh
+git clone https://github.com/richardstenlund/prylbanken.git
+cd prylbanken
+sh install.sh
+```
+
+Installeraren bygger och startar containern, skapar `.env` om den saknas och
+väntar på godkänd hälsokontroll. Vid en ny installation visas kontot **admin**
+och ett slumpmässigt lösenord. Spara lösenordet säkert; dela inte utskriften.
+
+### 2. Öppna sidan och logga in
+
+Visa serverns IP med `hostname -I`. Öppna **`http://SERVERNS-IP:8080`** i din
+webbläsare och ersätt `SERVERNS-IP` med rätt LAN-/VPN-adress. Logga in med
+`admin` och lösenordet från installationen.
+
+> Installeraren binder som standard port 8080 till alla nätverksgränssnitt.
+> Tillåt åtkomst bara från ditt betrodda LAN/VPN. Öppna inte porten i routern.
+> HTTP är okrypterat; använd HTTPS om trafiken inte skyddas av ditt nät/VPN.
+
+### 3. Fyll ditt bibliotek
+
+1. Öppna **Startbibliotek**, välj de paket du vill ha och importera.
+   Det finns **190 mallar och länkar i tio valfria paket**, bland annat Docker,
+   SteamCMD, spelservrar och Proxmox. Granska och anpassa dem innan användning.
+2. Klicka **Lägg till nytt** för egen kod, länk, anteckning eller bilaga.
+3. Använd **Serverregister & profiler** för servrar och gemensamma
+   mallvärden. Spara inga lösenord, token eller nycklar i profilerna.
+4. Under **Användare** byter du ditt lösenord och hanterar roller.
+   Självregistrerade konton blir **läsare**, inte administratörer.
+5. Under **Administration** kan du stänga registreringen och skapa/ladda ned
+   en full säkerhetskopia.
+
+### 4. Uppdatera utan att ta bort data
+
+Skapa och ladda ned en full backup via **Administration** först. Kör sedan
+i samma installationsmapp som tidigare:
+
+```sh
+cd prylbanken
+git pull --ff-only && sh install.sh
+docker compose ps
+```
+
+Din befintliga `.env`, dina konton och dina Docker-volymer bevaras.
+Databasen uppgraderas automatiskt. **Använd inte `docker compose down -v`:**
+det raderar volymerna med bibliotek och backuper.
+
+**Detaljerade guider:**
+[Installation, uppdatering och felsökning](docs/INSTALLATION.md) ·
+[Användarguide steg för steg](docs/ANVANDNING.md) ·
+[Backup och återställning](#säkerhetskopiering-och-återställning) ·
+[NAS-backup](#automatisk-backup-till-nas) ·
+[Konton och roller](#inloggning-och-användare)
+
+## Bilder från Prylbanken
+
+Bilderna är tagna från en separat demoinstallation med påhittade serveradresser
+och exempelposter. De visar inte ett verkligt bibliotek eller riktiga hemligheter.
+Demoexemplen följer inte automatiskt med en ny installation.
+
+<details>
+<summary>Inloggning och registrering</summary>
+
+![Inloggningssidan med val för att logga in eller skapa ett konto](docs/images/login.png)
+
+</details>
+
+<details>
+<summary>Kod, Docker, spelservrar och filer i biblioteket</summary>
+
+![Exempelposter med kodtext, bilaga, taggar och riskklass](docs/images/library-cards.png)
+
+</details>
+
+<details>
+<summary>Serverregister med administrationslänk och kopplad guide</summary>
+
+![Serverregistret med en Proxmox-exempelserver](docs/images/servers.png)
+
+</details>
+
+<details>
+<summary>Mallvariabler med sparad miljöprofil</summary>
+
+![Servermall med profilvärden och genererat kommando](docs/images/template.png)
+
+</details>
+
+<details>
+<summary>Checklistor och körguider</summary>
+
+![Körguide med förberedelser, serverkoppling och privata kryssrutor](docs/images/guides.png)
+
+</details>
+
 ## Bibliotek och administration
 
 - Kodvisning med lokal syntaxmarkering och radnummer. Kopiering och nedladdning
@@ -357,8 +473,9 @@ för privat åtkomst.
   den körs aldrig på servern. Även `.bat`, `.sh`, `.zip` och tomma filer fungerar.
 - Klicka på en titel för hela innehållet, eller kopiera direkt från kortet.
 - Filkategorin visar alla poster med bifogade filer.
-- Stjärnan markerar favoriter. Standardordningen visar favoriter först, därefter
-  senast uppdaterade poster. `/` fokuserar sökfältet.
+- Stjärnan markerar gemensamma favoriter. Admin-fästa poster visas alltid överst;
+  standardordningen visar sedan gemensamma favoriter och senast uppdaterade poster.
+  Hjärtat är en privat favorit. `/` fokuserar sökfältet och Ctrl/Cmd+K öppnar snabbsök.
 - **Startbibliotek** låter dig välja bland tio paket med totalt **190 mallar och länkar**:
   spelservrar/SteamCMD, Docker, Linux/backup, Windows/PowerShell, nätverk/SSH och
   Git/Python/SQL samt containerstarter, serverprogram och skript/automation.
