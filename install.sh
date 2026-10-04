@@ -67,10 +67,11 @@ printf '\n%s\n' 'Prylbanken ar startad och halsokontrollen har godkants.' 'Anvan
 if [ -n "$password" ]; then
     printf 'Losenord: %s\n' "$password"
 else
-    printf '%s\n' 'Anvand ditt befintliga APP_PASSWORD i .env.'
+    printf '%s\n' 'Anvand kontots befintliga losenord. Vid forsta konto-starten anvands APP_PASSWORD i .env.'
 fi
 printf '%s\n' \
     'Vid standardinstallationen: oppna http://SERVERNS-IP:8080 i din webblasare.' \
     'Om du redan hade en .env, anvand dess port och bindningsadress.' \
     'Visa serverns IP med: hostname -I' \
-    'Losenordet finns sparat i .env. Dela inte filen eller terminalutskriften.'
+    'APP_PASSWORD i .env anvands bara for att skapa forsta admin-kontot.' \
+    'Byt sedan losenord inne pa sidan under Anvandare. Dela inte .env eller terminalutskriften.'

@@ -5,6 +5,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8080}:8080"
     environment:
       APP_PASSWORD: ${APP_PASSWORD:?Ange APP_PASSWORD i .env (minst 12 tecken)}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     volumes:
       - prylbanken-data:/data
     restart: unless-stopped

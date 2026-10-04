@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11151d">
+  <title>Logga in – Prylbanken</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/login.js" defer></script>
+</head>
+<body class="login-page">
+  <div class="login-shell">
+    <section class="login-intro">
+      <a class="brand" href="/"><span class="brand-icon">P</span> prylbanken<span class="brand-dot">.</span></a>
+      <div class="login-story">
+        <p class="eyebrow">DITT PERSONLIGA IT-BIBLIOTEK</p>
+        <h1>Allt du vill<br>ha <span>nära till hands.</span></h1>
+        <p class="subtitle">Dina bästa kodsnuttar. Kommandot som alltid fungerar.<br>Den där filen du aldrig vill tappa bort.</p>
+        <div class="login-preview" aria-hidden="true">
+          <div class="preview-heading"><span class="status-dot"></span> bra-att-ha.sh <span>SPARAT I DITT BIBLIOTEK</span></div>
+          <pre><span class="code-comment"># Mindre letande. Mer skapande.</span>
+docker compose up -d
+
+<span class="code-comment"># Kunskapen stannar hos dig.</span>
+echo "Välkommen till Prylbanken"</pre>
+          <div class="tags"><span class="tag">#docker</span><span class="tag">#linux</span><span class="tag">#bra-att-ha</span></div>
+        </div>
+        <div class="login-features"><span>⌘ Kod & kommandon</span><span>↥ Filer & länkar</span><span>▦ Dina kategorier</span></div>
+      </div>
+      <p class="login-footnote"><span class="status-dot"></span> Självhostat. Ditt bibliotek, din server.</p>
+    </section>
+    <section class="login-panel">
+      <div class="login-card">
+        <div class="login-symbol">↪</div>
+        <p class="eyebrow">VÄLKOMMEN TILLBAKA</p>
+        <h2>Logga in i ditt bibliotek.</h2>
+        <p class="muted">En plats för allt som är bra att ha.</p>
+        <form id="login-form">
+          <label>Användarnamn<input name="username" required minlength="3" maxlength="40" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Ditt användarnamn" autofocus></label>
+          <label>Lösenord<div class="password-field"><input name="password" id="login-password" type="password" required maxlength="256" autocomplete="current-password" placeholder="Ditt lösenord"><button type="button" id="show-password" aria-pressed="false">Visa</button></div></label>
+          <p id="login-error" class="error" role="alert" hidden></p>
+          <button type="submit" class="primary" id="login-button">Logga in →</button>
+        </form>
+        <div class="login-help"><span>◇</span><p>Saknar du ett konto? Be en administratör skapa ett åt dig. Alla användare är administratörer och delar samma bibliotek.</p></div>
+      </div>
+      <p class="login-panel-footer">PRYLBANKEN <span>•</span> DITT DIGITALA FÖRRÅD</p>
+    </section>
+  </div>
+</body>
+</html>

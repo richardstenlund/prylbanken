@@ -13,6 +13,7 @@ const categories = [
 ];
 let items = [], active = "all", editing = null, detailItem = null, loading = true;
 let toastTimer;
+let csrf = "";
 const form = $("#edit-form");
 
 function el(tag, className, text) {
@@ -33,11 +34,15 @@ function showError(error, target = $("#error")) {
 }
 async function api(path, method = "GET", body) {
   const response = await fetch(path, {
-    method, headers: body === undefined ? {} : {"Content-Type": "application/json"},
+    method, headers: {...(body === undefined ? {} : {"Content-Type": "application/json"}),
+      ...(method === "GET" ? {} : {"X-CSRF-Token": csrf})},
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   if (!response.ok) {
-    if (response.status === 401) throw new Error("Inloggningen har gått ut. Ladda om sidan och logga in igen.");
+    if (response.status === 401) {
+      location.replace("/login");
+      throw new Error("Inloggningen har gått ut. Logga in igen.");
+    }
     const result = await response.json();
     throw new Error(result.error || `Serverfel (${response.status}).`);
   }
@@ -294,17 +299,105 @@ $("#import-file").addEventListener("change", async event => {
   } catch (error) { showError(error); }
   finally { event.target.value = ""; $("#import-button").disabled = false; }
 });
-const examples = [
-  {title:"Docker Compose – start & loggar", category:"docker", content:"docker compose up -d\ndocker compose logs -f --tail=100\ndocker compose ps", notes:"Kör i mappen där din compose.yaml ligger.", tags:"docker, compose", favorite:true},
-  {title:"SteamCMD – installera Valheim", category:"steamcmd", content:"steamcmd +force_install_dir ./valheim-server +login anonymous +app_update 896660 validate +quit", notes:"Byt installationsmapp efter behov. SteamCMD måste vara installerat.", tags:"valheim, installation"},
-  {title:"Valheim – startskript för Windows", category:"bat", content:'@echo off\nset SteamAppId=892970\nvalheim_server.exe -nographics -batchmode -name "Min server" -port 2456 -world "MinVarld" -password "BYT_MIG" -public 0\npause', notes:"Exempel: byt namn, värld och lösenord. Spara som start-server.bat i servermappen. Kör inte okända skript utan att läsa dem.", tags:"valheim, windows, bat"},
-  {title:"Docker – dokumentation", category:"lankar", content:"https://docs.docker.com/", notes:"Referens för Docker, Compose och containrar.", tags:"dokumentation"},
-  {title:"Minecraft Java – startkommando", category:"spelserver", content:"java -Xms2G -Xmx4G -jar server.jar nogui", notes:"Kräver kompatibel Java-version och server.jar. Läs och godkänn Mojangs EULA före användning.", tags:"minecraft, java"}
-];
-$("#examples-button").addEventListener("click", async () => {
-  $("#examples-button").disabled = true;
-  try { await api("/api/restore", "POST", {version:1, items:examples}); await load(); notify("Fem exempel har lagts till. Anpassa dem till din server."); }
-  catch (error) { showError(error); }
-  finally { $("#examples-button").disabled = false; }
+async function openCatalog() {
+  $("#catalog-error").hidden = true;
+  $("#catalog-packs").replaceChildren();
+  $("#add-packs-button").disabled = true;
+  $("#catalog-dialog").showModal();
+  try {
+    const catalog = await api("/api/examples");
+    catalog.packs.forEach(pack => {
+      const container = el("section", "catalog-pack");
+      const label = el("label", "pack-label");
+      const input = el("input");
+      input.type = "checkbox"; input.name = "packs"; input.value = pack.id; input.checked = true;
+      const heading = el("span");
+      heading.append(el("strong", "", pack.title), el("small", "", `${pack.count} mallar · ${pack.description}`));
+      label.append(input, heading);
+      const details = el("details", "pack-details");
+      details.append(el("summary", "", "Visa innehåll"));
+      catalog.items.filter(item => item.pack === pack.id).forEach(item => {
+        const example = el("div", "catalog-example");
+        example.append(el("strong", "", item.title), el("pre", "preview", item.content),
+          el("p", "muted", item.notes));
+        details.append(example);
+      });
+      container.append(label, details); $("#catalog-packs").append(container);
+    });
+    $("#add-packs-button").disabled = false;
+  } catch (error) { showError(error, $("#catalog-error")); }
+}
+$("#catalog-button").addEventListener("click", openCatalog);
+$("#examples-button").addEventListener("click", openCatalog);
+$("#close-catalog").addEventListener("click", () => $("#catalog-dialog").close());
+$("#catalog-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  $("#catalog-error").hidden = true; $("#add-packs-button").disabled = true;
+  try {
+    const packs = [...$("#catalog-packs").querySelectorAll("input:checked")].map(input => input.value);
+    if (!packs.length) throw new Error("Välj minst ett paket.");
+    const result = await api("/api/examples", "POST", {packs});
+    $("#catalog-dialog").close(); await load();
+    notify(`${result.added} mallar tillagda. ${result.skipped} redan sparade hoppades över.`);
+  } catch (error) { showError(error, $("#catalog-error")); }
+  finally { $("#add-packs-button").disabled = false; }
 });
-load();
+async function loadUsers() {
+  $("#users-error").hidden = true;
+  try {
+    const users = await api("/api/users");
+    $("#users-list").replaceChildren(...users.map(user => {
+      const row = el("div", "user-row");
+      row.append(el("span", "user-avatar", user.username.slice(0, 1).toUpperCase()),
+        el("strong", "", user.username), el("span", "category-badge", "Admin"));
+      return row;
+    }));
+  } catch (error) { showError(error, $("#users-error")); }
+}
+$("#users-button").addEventListener("click", () => {
+  $("#user-form").reset(); $("#password-form").reset();
+  $("#user-error").hidden = true; $("#password-error").hidden = true;
+  $("#users-list").replaceChildren();
+  $("#users-dialog").showModal(); loadUsers();
+});
+$("#close-users").addEventListener("click", () => $("#users-dialog").close());
+$("#logout-button").addEventListener("click", async () => {
+  $("#logout-button").disabled = true;
+  try { await api("/api/logout", "POST"); location.replace("/login"); }
+  catch (error) { showError(error); }
+  finally { $("#logout-button").disabled = false; }
+});
+$("#user-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const userForm = event.currentTarget;
+  $("#create-user-button").disabled = true; $("#user-error").hidden = true;
+  try {
+    await api("/api/users", "POST", {username:userForm.elements.username.value.trim(),
+      password:userForm.elements.password.value});
+    userForm.reset(); await loadUsers(); notify("Administratören har skapats.");
+  } catch (error) { showError(error, $("#user-error")); }
+  finally { $("#create-user-button").disabled = false; }
+});
+$("#password-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const passwordForm = event.currentTarget;
+  $("#change-password-button").disabled = true; $("#password-error").hidden = true;
+  try {
+    const current = passwordForm.elements.current_password.value;
+    const next = passwordForm.elements.new_password.value;
+    if (next !== passwordForm.elements.confirm_password.value) throw new Error("De nya lösenorden matchar inte.");
+    await api("/api/password", "PUT", {current_password:current, new_password:next});
+    location.replace("/login");
+  } catch (error) { showError(error, $("#password-error")); }
+  finally { $("#change-password-button").disabled = false; }
+});
+async function boot() {
+  try {
+    const user = await api("/api/me");
+    csrf = user.csrf;
+    $("#account-name").textContent = `${user.username} · Admin`;
+    await load();
+  } catch (error) { showError(error); }
+}
+window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });
+boot();

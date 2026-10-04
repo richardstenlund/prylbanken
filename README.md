@@ -40,7 +40,7 @@ finns kvar i `.env` även om bygget misslyckas.
 
 1. Installera Docker med Docker Compose.
 2. Kopiera `.env.example` till `.env`. Ange ett unikt lösenord på minst 12 tecken
-   i `APP_PASSWORD`. Använd inte kolon. För lösenord med `$`, omslut värdet med
+   i `APP_PASSWORD` (max 256 tecken). För lösenord med `$`, omslut värdet med
    enkla citattecken i `.env`. Dela eller checka inte in `.env`.
 3. Kör i den här mappen:
 
@@ -49,12 +49,38 @@ finns kvar i `.env` även om bygget misslyckas.
    ```
 
 4. Öppna <http://localhost:8080>. Logga in med användarnamnet **admin** och ditt
-   lösenord. Webbläsaren visar en inloggningsruta.
+   lösenord på Prylbankens inloggningssida.
 
 Allt sparas i SQLite i den namngivna Docker-volymen `prylbanken-data`, inklusive
 filer. Inga externa tjänster, typsnitt eller beroenden behövs. Innehållet är inte
-krypterat på disk. Detta är ett privat bibliotek med ett gemensamt adminkonto,
-inte en fleranvändartjänst med separata rättigheter.
+krypterat på disk. Biblioteket delas av alla användare; alla konton har
+administratörsbehörighet. Det finns inga privata samlingar eller separata rättigheter.
+
+## Inloggning och användare
+
+- Vid första starten skapas `admin` med lösenordet i `APP_PASSWORD`. Vid uppgradering
+  från Basic-inloggningen används samma lösenord. Befintligt innehåll behålls.
+- Logga in via den nya inloggningssidan. Webbläsarens gamla Basic-inloggning
+  används inte längre.
+- Klicka på **Användare** för att se konton och skapa en ny administratör.
+  Bara inloggade administratörer kan skapa konton. Självregistrering är inte tillåten.
+- Användarnamn innehåller 3–40 tecken (a–z, siffror, punkt, bindestreck eller
+  understreck) och sparas med små bokstäver. Lösenord kräver 12–256 tecken.
+- Alla användare kan läsa, redigera och radera hela biblioteket, exportera filer
+  och skapa fler administratörer. Skapa därför bara konton åt personer du litar på.
+- Under **Användare → Byt ditt lösenord** kan användaren ändra sitt eget lösenord.
+  Alla användarens sessioner återkallas och ny inloggning krävs.
+- **Logga ut** återkallar den aktuella sessionen. Sessioner gäller i 12 timmar
+  och sparas i databasen så att en containeromstart inte loggar ut alla.
+- Lösenord sparas som individuellt saltade PBKDF2-SHA256-hashar (600 000 iterationer),
+  inte i klartext. Sessionscookies är HttpOnly och SameSite=Strict. Skrivningar
+  skyddas av en sessionstoken för CSRF. Inloggningsförsök begränsas till 10 per
+  fem minuter och anslutande IP; bakom en reverseproxy kan gränsen delas av alla.
+- `APP_PASSWORD` används **bara för att skapa första kontot**. Att ändra `.env`
+  återställer inte ett befintligt lösenord. Behåll tillgången till minst ett konto;
+  lösenordsåterställning via e-post och radering av konton ingår inte.
+- JSON-exporten innehåller biblioteket, inte konton eller sessioner. En
+  fullständig Docker-volymbackup innehåller även dessa.
 
 ## Nå sidan från andra enheter
 
@@ -62,11 +88,15 @@ Som säkert standardval exponeras porten bara på Docker-värdens localhost.
 För andra enheter: använd en HTTPS-reverseproxy som kan nå port 8080.
 Vid direkt LAN-test kan `BIND_ADDRESS=0.0.0.0` anges i `.env`. Öppna då
 `http://SERVERNS-IP:8080`, men endast på ett betrott privat nätverk.
-HTTP Basic-inloggning skickar inte lösenordet krypterat utan HTTPS.
+HTTP skickar lösenord och sessionscookies utan transportkryptering.
 Exponera därför **inte** HTTP-porten direkt mot internet. Kopiering till urklipp
 kräver HTTPS eller localhost; annars visas ett fel och texten kan kopieras manuellt.
 Reverseproxyn måste bevara ursprunglig `Host` för skrivningar och tillåta
-begäranden på upp till 29 MB. Använd gärna VPN för privat åtkomst.
+begäranden på upp till 29 MB. Vid HTTPS, ange `COOKIE_SECURE=true` i `.env`
+och återskapa containern med `docker compose up -d`; då skickas cookies bara
+över HTTPS. Behåll `false` för direkt HTTP-åtkomst på LAN. Servern litar inte
+automatiskt på `X-Forwarded-Proto` eller `X-Forwarded-For`. Använd gärna VPN
+för privat åtkomst.
 
 ## Användning
 
@@ -86,9 +116,19 @@ begäranden på upp till 29 MB. Använd gärna VPN för privat åtkomst.
 - Filkategorin visar alla poster med bifogade filer.
 - Stjärnan markerar favoriter. Standardordningen visar favoriter först, därefter
   senast uppdaterade poster. `/` fokuserar sökfältet.
-- Start­exemplen läggs till först när du själv klickar på knappen i en tom samling.
-  Kommandona är mallar; anpassa dem före körning. Lösenordet `BYT_MIG` är en
-  platshållare, inte ett riktigt serverlösenord.
+- **Startbibliotek** låter dig välja bland sex paket med totalt 60 mallar:
+  spelservrar/SteamCMD, Docker, Linux/backup, Windows/PowerShell, nätverk/SSH och
+  Git/Python/SQL. Samma knapp finns i den tomma samlingen.
+- Spelmallarna omfattar Valheim, Rust, Palworld, Satisfactory, CS2, Team Fortress 2,
+  Minecraft Java och Bedrock, Factorio, Terraria samt 7 Days to Die.
+  Plattformar och installationsmetoder varierar per spel.
+- Du kan förhandsvisa kommandon och referenser innan paketen läggs till. Alla
+  mallar är redigerbara. Inga kommandon körs av webbplatsen. Anpassa sökvägar,
+  lösenord, RAM, spelversion och portar innan du använder dem.
+- Upprepad tilläggning via Startbibliotek hoppar över redan importerade mallar
+  och skriver inte över dina ändringar. En raderad mall kan läggas till igen.
+  De fem äldre startexemplen och vanliga JSON-importer har inte samma
+  importmarkering och kan därför överlappa med de nya mallarna.
 - Länkar är bokmärken. Sidan laddar inte ned externa webbplatsers innehåll.
 - Exportera skapar en JSON-fil med allt innehåll, inklusive filer. Den kan
   innehålla känslig kod eller hemligheter; förvara säkerhetskopian säkert.
@@ -109,9 +149,14 @@ Säkerhetskopiera regelbundet med Exportera och, för större samlingar, en
 volymbackup när containern är stoppad. Bevara hela datamappen inklusive eventuella
 SQLite WAL/SHM-filer. `.env` behöver säkerhetskopieras separat.
 
-Byt lösenord i `.env` och kör `docker compose up -d` för att återskapa containern.
-Webbläsarens Basic-inloggning kan cachelagras; stäng webbläsaren efter användning
-på delade datorer.
+Byt befintliga användarlösenord inne på sidan under **Användare**.
+Logga alltid ut efter användning på delade datorer.
+
+Uppdatera en befintlig installation utan att radera data:
+
+```sh
+git pull --ff-only && sh install.sh
+```
 
 ## Lokal verifiering utan Docker
 
