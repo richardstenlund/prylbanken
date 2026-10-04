@@ -1,6 +1,6 @@
 "use strict";
 const $ = (selector) => document.querySelector(selector);
-const categories = [
+const builtInCategories = [
   ["all", "Allt innehåll", "▦"], ["favorites", "Favoriter", "☆"],
   ["lankar", "Länkar", "↗"], ["kod", "Kodsnuttar", "⌘"],
   ["docker", "Docker", "▣"], ["spelserver", "Spelservrar", "◈"],
@@ -11,7 +11,8 @@ const categories = [
   ["sakerhet", "IT-säkerhet", "◇"], ["dokumentation", "Guider & anteckningar", "▧"],
   ["filer", "Filer", "↥"]
 ];
-let items = [], active = "all", editing = null, detailItem = null, loading = true;
+let categories = [...builtInCategories], items = [], active = "all", editing = null, detailItem = null, loading = true;
+let currentHistoryItem = null, currentHistory = [], currentUser = null;
 let toastTimer;
 let csrf = "";
 const form = $("#edit-form");
@@ -21,6 +22,241 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+function formatDate(value) {
+  const date = new Date(String(value || "").replace(" ", "T") + (/(?:Z|[+-]\d{2}:\d{2})$/.test(String(value || "")) ? "" : "Z"));
+  return Number.isNaN(date.getTime()) ? value || "Okänt datum" : date.toLocaleString("sv-SE");
+}
+function openHistory(item = detailItem) {
+  if (!item) return;
+  currentHistoryItem = item;
+  $("#history-error").hidden = true;
+  $("#history-list").replaceChildren();
+  $("#history-preview").replaceChildren();
+  $("#history-dialog").showModal();
+  loadHistory();
+}
+async function loadHistory() {
+  $("#history-error").hidden = true;
+  try {
+    currentHistory = await api(`/api/items/${currentHistoryItem.id}/history`);
+    if (!currentHistory.length) {
+      $("#history-list").append(el("p", "muted", "Det finns inga tidigare versioner."));
+      return;
+    }
+    currentHistory.forEach(snapshot => {
+      const row = el("article", "history-row");
+      const info = el("div", "history-info");
+      info.append(el("strong", "", snapshot.title || "Namnlös version"),
+        el("small", "muted", `${formatDate(snapshot.created)} · ${snapshot.actor || "Okänd användare"}`));
+      const preview = action("Visa", "small-button", () => {
+        $("#history-preview").replaceChildren(
+          el("h3", "", snapshot.title || "Namnlös version"),
+          codeBlock(snapshot.content || "", snapshot.language || "plain", true, "detail-code"),
+          action("Kopiera version", "secondary", () => copy(snapshot.content || "")),
+          action("Återställ den här versionen", "primary", async () => {
+            if (!confirm(`Återställa versionen "${snapshot.title || "Namnlös version"}" från ${formatDate(snapshot.created)}? Nuvarande innehåll blir en version i historiken.`)) return;
+            preview.disabled = true;
+            try {
+              await api(`/api/items/${currentHistoryItem.id}/history/${snapshot.id}/restore`, "POST", {});
+              await load();
+              detailItem = items.find(entry => entry.id === currentHistoryItem.id) || null;
+              if (detailItem) showDetail(detailItem);
+              $("#history-dialog").close();
+              notify("Versionen har återställts.");
+            } catch (error) { showError(error, $("#history-error")); }
+            finally { preview.disabled = false; }
+          })
+        );
+      });
+      row.append(info, preview);
+      $("#history-list").append(row);
+    });
+  } catch (error) { showError(error, $("#history-error")); }
+}
+async function loadTrash() {
+  $("#trash-error").hidden = true;
+  $("#trash-list").replaceChildren();
+  try {
+    const deleted = await api("/api/trash");
+    if (!deleted.length) {
+      $("#trash-list").append(el("p", "muted", "Papperskorgen är tom."));
+      return;
+    }
+    deleted.forEach(item => {
+      const row = el("article", "management-row");
+      const info = el("div", "management-info");
+      info.append(el("strong", "", item.title), el("small", "muted", `${categoryName(item.category)} · ${formatDate(item.deleted_at || item.updated)}`));
+      const restore = action("Återställ", "secondary", async () => {
+        restore.disabled = true; permanent.disabled = true;
+        try { await api(`/api/items/${item.id}/restore`, "POST", {}); await load(); await loadTrash(); notify("Posten har återställts."); }
+        catch (error) { showError(error, $("#trash-error")); }
+        finally { restore.disabled = false; permanent.disabled = false; }
+      });
+      const permanent = action("Radera permanent", "danger-button", async () => {
+        if (!confirm(`Radera "${item.title}" permanent, inklusive eventuell bifogad fil? Detta går inte att ångra.`)) return;
+        restore.disabled = true; permanent.disabled = true;
+        try { await api(`/api/trash/${item.id}`, "DELETE"); await loadTrash(); notify("Posten har raderats permanent."); }
+        catch (error) { showError(error, $("#trash-error")); }
+        finally { restore.disabled = false; permanent.disabled = false; }
+      });
+      row.append(info, restore, permanent);
+      $("#trash-list").append(row);
+    });
+  } catch (error) { showError(error, $("#trash-error")); }
+}
+function categoryDescendants(key) {
+  const result = new Set([key]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    categories.forEach(category => {
+      if (category[3] && result.has(category[3]) && !result.has(category[0])) {
+        result.add(category[0]); changed = true;
+      }
+    });
+  }
+  return result;
+}
+function fillParentSelect(select, selected = "", exclude = new Set()) {
+  select.replaceChildren();
+  select.append(el("option", "", "Ingen (rot)"));
+  select.firstElementChild.value = "";
+  categories.slice(2).filter(category => !exclude.has(category[0])).forEach(category => {
+    const option = el("option", "", categoryName(category[0]));
+    option.value = category[0]; select.append(option);
+  });
+  select.value = selected || "";
+}
+async function loadCategoriesForManagement() {
+  $("#category-error").hidden = true;
+  try {
+  await load();
+  const trash = await api("/api/trash");
+  fillParentSelect($("#category-form").elements.parent);
+  $("#category-list").replaceChildren();
+  categories.slice(2).forEach(category => {
+    const [key, name, , parent] = category;
+    const row = el("article", "category-row");
+    const builtin = builtInCategories.some(entry => entry[0] === key);
+    const nameInput = document.createElement("input");
+    nameInput.value = name; nameInput.maxLength = 60; nameInput.setAttribute("aria-label", `Namn för ${name}`);
+    const parentSelect = document.createElement("select");
+    parentSelect.setAttribute("aria-label", `Överordnad kategori för ${name}`);
+    fillParentSelect(parentSelect, parent, categoryDescendants(key));
+    const save = action("Spara", "secondary", async () => {
+      if (!nameInput.value.trim()) { showError(new Error("Kategorin måste ha ett namn."), $("#category-error")); return; }
+      save.disabled = true;
+      try { await api(`/api/categories/${encodeURIComponent(key)}`, "PUT", {name:nameInput.value.trim(), parent:parentSelect.value || null}); await loadCategoriesForManagement(); notify("Kategorin har uppdaterats."); }
+      catch (error) { showError(error, $("#category-error")); }
+      finally { save.disabled = false; }
+    });
+    const moveTo = document.createElement("select");
+    moveTo.setAttribute("aria-label", `Flytta innehåll från ${name} till`);
+    const destinations = categories.slice(2).filter(entry => !categoryDescendants(key).has(entry[0]));
+    destinations.forEach(entry => {
+      const option = el("option", "", categoryName(entry[0]));
+      option.value = entry[0]; moveTo.append(option);
+    });
+    moveTo.value = destinations.some(entry => entry[0] === "kod") ? "kod" : destinations[0][0];
+    const hasItems = [...items, ...trash].some(item => item.category === key);
+    if (!hasItems) {
+      moveTo.replaceChildren(el("option", "", "Inget innehåll att flytta"));
+      moveTo.firstElementChild.value = "";
+      moveTo.disabled = true;
+    }
+    const hasChildren = categories.some(entry => entry[3] === key);
+    const remove = action("Ta bort", "danger-button", async () => {
+      if (hasChildren) {
+        showError(new Error("Flytta eller ta först bort underkategorierna."), $("#category-error"));
+        return;
+      }
+      const question = hasItems
+        ? `Ta bort kategorin "${name}" och flytta dess innehåll till den valda kategorin?`
+        : `Ta bort den tomma kategorin "${name}"?`;
+      if (!confirm(question)) return;
+      if (hasItems && !moveTo.value) {
+        showError(new Error("Välj en kategori att flytta innehållet till."), $("#category-error"));
+        return;
+      }
+      save.disabled = true; remove.disabled = true;
+      try {
+        await api(`/api/categories/${encodeURIComponent(key)}`, "DELETE", hasItems ? {move_to:moveTo.value} : {});
+        await loadCategoriesForManagement(); notify("Kategorin har tagits bort.");
+      }
+      catch (error) { showError(error, $("#category-error")); }
+      finally { save.disabled = false; remove.disabled = false; }
+    });
+    remove.disabled = builtin || hasChildren;
+    if (builtin) remove.title = "Inbyggda kategorier kan byta namn och flyttas, men inte tas bort.";
+    else if (hasChildren) remove.title = "Flytta eller ta först bort underkategorierna.";
+    row.append(el("span", "category-row-label", categoryName(key)), nameInput, parentSelect, save,
+      ...(hasItems ? [moveTo] : []), remove);
+    $("#category-list").append(row);
+  });
+  } catch (error) { showError(error, $("#category-error")); }
+}
+async function loadActivity() {
+  $("#activity-error").hidden = true;
+  $("#activity-list").replaceChildren();
+  try {
+    const entries = await api("/api/activity");
+    if (!entries.length) $("#activity-list").append(el("p", "muted", "Ingen aktivitet ännu."));
+    entries.forEach(entry => {
+      const row = el("article", "management-row activity-row");
+      row.append(el("strong", "", activityName(entry.action)), el("span", "", entry.target || ""),
+        el("small", "muted", `${entry.actor || "Okänd användare"} · ${formatDate(entry.created)}`));
+      $("#activity-list").append(row);
+    });
+  } catch (error) { showError(error, $("#activity-error")); }
+}
+function activityName(action) {
+  return ({
+    "item.create": "Post skapad", "item.update": "Post ändrad", "item.trash": "Post till papperskorgen",
+    "item.restore": "Post återställd", "item.restore-version": "Version återställd",
+    "item.delete-permanently": "Post raderad permanent", "item.move-category": "Post flyttad",
+    "items.import": "Bibliotek importerat", "examples.import": "Startmallar importerade",
+    "category.create": "Kategori skapad", "category.update": "Kategori ändrad",
+    "category.delete": "Kategori borttagen", "category.restore": "Kategori återställd",
+    "user.create": "Konto skapat", "user.login": "Inloggning", "user.enable": "Konto aktiverat",
+    "user.disable": "Konto inaktiverat", "user.reset-password": "Lösenord återställt",
+    "user.password": "Lösenord ändrat", "settings.registration": "Registrering ändrad",
+    "backup.create": "Säkerhetskopia skapad", "database.restore": "Databas återställd"
+  })[action] || action;
+}
+async function loadAdmin() {
+  $("#admin-error").hidden = true;
+  $("#backup-status").textContent = "Laddar status…";
+  $("#backup-list").replaceChildren();
+  try {
+    const [settings, backups] = await Promise.all([api("/api/settings"), api("/api/backups")]);
+    $("#registration-toggle").checked = Boolean(settings.registration_open);
+    $("#backup-status").textContent = `${backups.enabled ? "Automatiska säkerhetskopior är aktiverade." : "Automatiska säkerhetskopior är avstängda."}${backups.last_error ? ` Senaste fel: ${backups.last_error}` : ""}`;
+    if (!backups.files.length) $("#backup-list").append(el("p", "muted", "Inga säkerhetskopior tillgängliga."));
+    backups.files.forEach(file => {
+      const row = el("article", "management-row backup-row");
+      const info = el("div", "management-info");
+      info.append(el("strong", "", file.name), el("small", "muted", `${formatDate(file.created)} · ${formatSize(file.size)}`));
+      const download = el("a", "small-button", "Ladda ned");
+      download.href = `/api/backups/${encodeURIComponent(file.name)}`;
+      download.setAttribute("download", file.name);
+      const restore = action("Full återställning", "danger-button", async () => {
+        const first = confirm(`Full återställning från "${file.name}" ersätter hela databasen: alla poster, konton, inställningar och historik blir som i säkerhetskopian. Servern skapar först en säkerhetskopia av nuläget. Du loggas ut efter återställningen. Fortsätta?`);
+        if (!first || !confirm("Bekräfta en gång till: ersätt hela Prylbanken och logga ut?")) return;
+        restore.disabled = true;
+        try {
+          await api(`/api/backups/${encodeURIComponent(file.name)}/restore`, "POST", {confirm:true});
+          location.replace("/login");
+        } catch (error) { showError(error, $("#admin-error")); }
+        finally { restore.disabled = false; }
+      });
+      row.append(info, download, restore);
+      $("#backup-list").append(row);
+    });
+  } catch (error) {
+    $("#backup-status").textContent = "Säkerhetskopiestatus kunde inte hämtas.";
+    showError(error, $("#admin-error"));
+  }
 }
 function notify(message) {
   $("#toast").textContent = message;
@@ -51,11 +287,19 @@ async function api(path, method = "GET", body) {
 async function load() {
   $("#error").hidden = true;
   try {
-    items = await api("/api/items");
+    const [loadedItems, loadedCategories] = await Promise.all([api("/api/items"), api("/api/categories")]);
+    items = loadedItems;
+    categories = builtInCategories.slice(0, 2);
+    const categoryData = loadedCategories.filter(category => !["all", "favorites"].includes(category.key)).map(category => {
+      const builtin = builtInCategories.find(entry => entry[0] === category.key);
+      return [category.key, category.name, builtin?.[2] || "▧", category.parent || null];
+    });
+    categories.push(...categoryData);
     items.forEach(item => {
       if (!categories.some(c => c[0] === item.category)) categories.push([item.category, item.category, "▧"]);
     });
-    loading = false; render();
+    if (!categories.some(category => category[0] === active)) active = "all";
+    loading = false; populateFilters(); render();
   }
   catch (error) { showError(error); }
 }
@@ -63,7 +307,10 @@ function filtered() {
   const query = $("#search").value.toLocaleLowerCase("sv");
   return items.filter(item =>
     (active === "all" || (active === "favorites" ? item.favorite : active === "filer" ? item.filename !== null || item.category === "filer" : item.category === active)) &&
-    [item.title, item.content, item.notes, item.tags, item.filename || ""].join(" ").toLocaleLowerCase("sv").includes(query)
+    [item.title, item.content, item.notes, item.tags, item.filename || "", item.os || "", item.program_version || "", item.ports || "", item.dependencies || "", item.language || ""].join(" ").toLocaleLowerCase("sv").includes(query) &&
+    (!$("#filter-os").value || item.os === $("#filter-os").value) &&
+    (!$("#filter-status").value || item.status === $("#filter-status").value) &&
+    (!$("#filter-language").value || item.language === $("#filter-language").value)
   ).sort((a, b) => {
     if ($("#sort").value === "title") return a.title.localeCompare(b.title, "sv");
     const order = a.updated.localeCompare(b.updated) || a.id - b.id;
@@ -81,6 +328,102 @@ function action(label, className, handler) {
   button.addEventListener("click", handler);
   return button;
 }
+const keywordSets = {
+  bash: /\b(?:if|then|else|fi|for|while|do|done|case|esac|function|export|local|return|sudo|echo)\b/g,
+  powershell: /\b(?:param|function|if|else|elseif|foreach|while|try|catch|return|Write-Host|Get-\w+|Set-\w+|New-\w+)\b/gi,
+  bat: /\b(?:echo|set|if|else|for|in|do|call|goto|pause|exit|rem)\b/gi,
+  yaml: /\b(?:true|false|null|yes|no)\b/gi,
+  json: /\b(?:true|false|null)\b/g,
+  python: /\b(?:and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield)\b/g,
+  javascript: /\b(?:async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|false|finally|for|function|if|import|in|instanceof|let|new|null|of|return|static|super|switch|this|throw|true|try|typeof|var|void|while|yield)\b/g,
+  sql: /\b(?:select|from|where|and|or|not|null|insert|into|values|update|set|delete|create|alter|drop|table|join|left|right|inner|on|as|order|by|group|having|limit|primary|key|foreign|references|begin|commit|rollback)\b/gi
+};
+function codeBlock(text, language = "plain", lineNumbers = false, className = "code-block") {
+  const pre = el("pre", className);
+  const lines = String(text).split("\n");
+  lines.forEach((line, index) => {
+    const row = el("span", "code-line");
+    if (lineNumbers) {
+      const number = el("span", "line-number", String(index + 1));
+      number.setAttribute("aria-hidden", "true");
+      row.append(number);
+    }
+    const commentPattern = language === "sql" ? /--.*/ : language === "javascript" ? /\/\/.*/ :
+      ["bash", "powershell", "python", "yaml"].includes(language) ? /#.*/ :
+        language === "bat" ? /(?:^|\s)(?:rem\b|::).*/i : null;
+    let cursor = 0;
+    const appendTokenized = segment => {
+      const combined = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b)/g;
+      const keywords = keywordSets[language];
+      const tokens = [];
+      if (keywords) {
+        keywords.lastIndex = 0;
+        let keyword;
+        while ((keyword = keywords.exec(segment))) tokens.push({start: keyword.index, end: keyword.index + keyword[0].length, kind: "keyword"});
+      }
+      let match;
+      while ((match = combined.exec(segment))) tokens.push({
+        start: match.index, end: match.index + match[0].length,
+        kind: /^\d/.test(match[0]) ? "number" : "string"
+      });
+      tokens.sort((a, b) => a.start - b.start || b.end - a.end);
+      let position = 0;
+      tokens.forEach(token => {
+        if (token.start < position) return;
+        if (token.start > position) row.append(document.createTextNode(segment.slice(position, token.start)));
+        row.append(el("span", `syntax-${token.kind}`, segment.slice(token.start, token.end)));
+        position = token.end;
+      });
+      row.append(document.createTextNode(segment.slice(position)));
+    };
+    if (commentPattern) {
+      const comment = commentPattern.exec(line);
+      if (comment) {
+        cursor = comment.index;
+        appendTokenized(line.slice(0, cursor));
+        row.append(el("span", "syntax-comment", line.slice(cursor)));
+      } else appendTokenized(line);
+    } else appendTokenized(line);
+    if (!line.length) row.append(document.createTextNode(" "));
+    pre.append(row);
+  });
+  return pre;
+}
+function metadataSummary(item) {
+  return [
+    item.os && `OS: ${item.os}`,
+    item.program_version && `Version: ${item.program_version}`,
+    item.ports && `Portar: ${item.ports}`,
+    item.dependencies && `Beroenden: ${item.dependencies}`,
+    item.tested_at && `Testad: ${item.tested_at}`,
+    item.status && `Status: ${statusName(item.status)}`,
+    item.language && item.language !== "plain" && `Språk: ${item.language}`
+  ].filter(Boolean).join(" · ");
+}
+function statusName(status) {
+  return ({template:"Mall", tested:"Testad", "needs-update":"Behöver uppdateras"})[status] || status;
+}
+function categoryName(key, seen = new Set()) {
+  const category = categories.find(entry => entry[0] === key);
+  if (!category) return key;
+  if (seen.has(key)) return category[1];
+  seen.add(key);
+  const parent = category[3] ? categoryName(category[3], seen) : "";
+  return parent && !["Allt innehåll", "Favoriter"].includes(parent) ? `${parent} / ${category[1]}` : category[1];
+}
+function populateFilters() {
+  const fill = (selector, values, firstLabel, labels = {}) => {
+    const select = $(selector), value = select.value;
+    select.replaceChildren(el("option", "", firstLabel));
+    select.firstElementChild.value = "";
+    [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "sv")).forEach(item => {
+      const option = el("option", "", labels[item] || item); option.value = item; select.append(option);
+    });
+    select.value = values.includes(value) ? value : "";
+  };
+  fill("#filter-os", items.map(item => item.os), "Alla system");
+  fill("#filter-language", items.map(item => item.language), "Alla språk");
+}
 function render() {
   $("#navigation").replaceChildren();
   categories.forEach(([key, name, icon], index) => {
@@ -89,10 +432,12 @@ function render() {
       active = key; render();
     });
     button.setAttribute("aria-current", active === key ? "page" : "false");
+    const depth = categoryDepth(key);
+    button.style.paddingLeft = `${12 + depth * 14}px`;
     button.append(el("span", "nav-icon", icon), el("span", "", name), el("span", "nav-count", count(key)));
     $("#navigation").append(button);
   });
-  const name = categories.find(c => c[0] === active)[1];
+  const name = categoryName(active);
   $("#breadcrumb").textContent = name;
   $("#collection-title").textContent = name;
   $("#total").textContent = items.length;
@@ -107,6 +452,12 @@ function render() {
   $("#empty-title").textContent = first ? "Här börjar din samling." : "Inga träffar den här gången.";
   $("#empty-text").textContent = first ? "Spara din första länk, kodsnutt eller fil – och slipp leta nästa gång." : "Prova en annan sökning eller lägg till något i den här kategorin.";
   $("#examples-button").hidden = !first;
+}
+function categoryDepth(key, seen = new Set()) {
+  const category = categories.find(entry => entry[0] === key);
+  if (!category || !category[3] || seen.has(key)) return 0;
+  seen.add(key);
+  return 1 + categoryDepth(category[3], seen);
 }
 function fileLink(item) {
   const link = el("a", "file-link", `↓ ${item.filename} · ${formatSize(item.filesize)}`);
@@ -132,7 +483,12 @@ function card(item) {
   const title = el("h3");
   title.append(action(item.title, "title-button", () => showDetail(item)));
   node.append(top, title);
-  if (item.content) node.append(el("pre", "preview", item.content));
+  if (item.content) {
+    const preview = item.content.slice(0, 2000).split("\n").slice(0, 8).join("\n");
+    node.append(codeBlock(preview, item.language || "plain", false, "preview"));
+  }
+  const metadata = metadataSummary(item);
+  if (metadata) node.append(el("p", "metadata-summary", metadata));
   if (item.notes) node.append(el("p", "card-notes", item.notes));
   if (item.filename !== null) node.append(fileLink(item));
   const tags = el("div", "tags");
@@ -151,9 +507,9 @@ function card(item) {
   }
   actions.append(action("Redigera", "small-button", () => openEditor(item)));
   const remove = action("×", "small-button delete-button", async () => {
-    if (!confirm(`Ta bort "${item.title}" och eventuell bifogad fil? Detta kan inte ångras.`)) return;
+    if (!confirm(`Flytta "${item.title}" till papperskorgen? Du kan återställa den senare.`)) return;
     remove.disabled = true;
-    try { await api(`/api/items/${item.id}`, "DELETE"); await load(); notify("Posten är borttagen."); }
+    try { await api(`/api/items/${item.id}`, "DELETE"); await load(); notify("Posten flyttades till papperskorgen."); }
     catch (error) { showError(error); }
     finally { remove.disabled = false; }
   });
@@ -175,17 +531,19 @@ function openEditor(item = null) {
   populateCategories();
   $("#form-error").hidden = true;
   $("#editor-title").textContent = item ? "Redigera sparad sak" : "Lägg till nytt";
-  ["title", "category", "content", "notes", "tags"].forEach(name => {
-    form.elements[name].value = item ? item[name] : name === "category" ? (["all", "favorites"].includes(active) ? "kod" : active) : "";
+  ["title", "download_name", "category", "content", "notes", "tags", "language", "os",
+    "program_version", "ports", "dependencies", "tested_at", "status"].forEach(name => {
+    const fallback = name === "category" ? (["all", "favorites"].includes(active) ? "kod" : active) :
+      name === "language" ? "plain" : name === "status" ? "template" : "";
+    if (!item && name === "category" && !categories.some(category => category[0] === fallback)) {
+      form.elements[name].value = "kod";
+    } else form.elements[name].value = item ? item[name] ?? fallback : fallback;
   });
   form.elements.favorite.checked = Boolean(item?.favorite);
   $("#existing-file").textContent = item?.filename !== null && item?.filename !== undefined ? `Bifogad: ${item.filename}. Välj en ny fil för att ersätta den.` : "";
   updateCategory(); $("#editor").showModal();
 }
 function updateCategory() {
-  const custom = form.elements.category.value === "__custom";
-  $("#custom-category-label").hidden = !custom;
-  $("#custom-category").required = custom;
   const link = form.elements.category.value === "lankar";
   $("#content-caption").textContent = link ? "Webbadress (http:// eller https://)" : "Kod, kommando eller text";
   form.elements.content.placeholder = link ? "https://…" : "Klistra in det du vill spara…";
@@ -198,10 +556,12 @@ function showDetail(item) {
   const body = $("#detail-body");
   body.replaceChildren();
   if (item.content) {
-    body.append(el("pre", "detail-code", item.content));
+    body.append(codeBlock(item.content, item.language || "plain", true, "detail-code"));
     body.append(action("Kopiera innehåll", "secondary", () => copy(item.content)));
     body.append(action("↓ Ladda ned text", "secondary", () => downloadText(item)));
   }
+  const metadata = metadataSummary(item);
+  if (metadata) body.append(el("p", "metadata-summary detail-metadata", metadata));
   if (item.notes) body.append(el("p", "detail-notes", item.notes));
   if (item.filename !== null) body.append(fileLink(item));
   $("#detail").showModal();
@@ -219,8 +579,8 @@ form.addEventListener("submit", async event => {
   $("#form-error").hidden = true;
   $("#save-button").disabled = true;
   try {
-    const payload = Object.fromEntries(["title", "category", "content", "notes", "tags"].map(name => [name, form.elements[name].value]));
-    if (payload.category === "__custom") payload.category = $("#custom-category").value.trim();
+    const payload = Object.fromEntries(["title", "download_name", "category", "content", "notes", "tags", "language",
+      "os", "program_version", "ports", "dependencies", "tested_at", "status"].map(name => [name, form.elements[name].value]));
     payload.favorite = form.elements.favorite.checked;
     const file = $("#attachment").files[0];
     if (file) {
@@ -232,17 +592,17 @@ form.addEventListener("submit", async event => {
   } catch (error) { showError(error, $("#form-error")); }
   finally { $("#save-button").disabled = false; }
 });
-function categoryName(key) { return categories.find(c => c[0] === key)?.[1] || key; }
 function populateCategories() {
   $("#category-input").replaceChildren();
-  [...categories.slice(2), ["__custom", "＋ Egen kategori"]].forEach(([value, label]) => {
-    const option = el("option", "", label); option.value = value; $("#category-input").append(option);
+  categories.slice(2).forEach(([value]) => {
+    const option = el("option", "", categoryName(value)); option.value = value; $("#category-input").append(option);
   });
 }
 function downloadText(item) {
   const extensions = {bat: ".bat", linux: ".sh", databaser: ".sql", docker: ".txt"};
-  const safe = item.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 120).replace(/[. ]+$/, "") || "kod";
-  const filename = /\.[a-z0-9]{1,8}$/i.test(safe) ? safe : safe + (extensions[item.category] || ".txt");
+  const preferred = (item.download_name || "").trim();
+  const safe = (preferred || item.title).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 200).replace(/[. ]+$/, "") || "kod";
+  const filename = preferred ? safe : /\.[a-z0-9]{1,8}$/i.test(safe) ? safe : safe + (extensions[item.category] || ".txt");
   const url = URL.createObjectURL(new Blob([item.content], {type:"text/plain;charset=utf-8"}));
   const link = el("a"); link.href = url; link.download = filename;
   document.body.append(link); link.click(); link.remove();
@@ -269,9 +629,11 @@ $("#first-button").addEventListener("click", () => openEditor());
 document.querySelectorAll(".close-detail").forEach(button => button.addEventListener("click", () => $("#detail").close()));
 document.querySelectorAll(".close-dialog").forEach(button => button.addEventListener("click", () => $("#editor").close()));
 $("#detail-edit").addEventListener("click", () => { $("#detail").close(); openEditor(detailItem); });
+$("#detail-history").addEventListener("click", () => openHistory(detailItem));
 $("#category-input").addEventListener("change", updateCategory);
 $("#search").addEventListener("input", render);
 $("#sort").addEventListener("change", render);
+["#filter-os", "#filter-status", "#filter-language"].forEach(selector => $(selector).addEventListener("change", render));
 document.addEventListener("keydown", event => {
   if (event.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) && !document.querySelector("dialog[open]")) {
     event.preventDefault(); $("#search").focus();
@@ -348,8 +710,38 @@ async function loadUsers() {
     const users = await api("/api/users");
     $("#users-list").replaceChildren(...users.map(user => {
       const row = el("div", "user-row");
+      const isSelf = currentUser && user.username === currentUser.username;
       row.append(el("span", "user-avatar", user.username.slice(0, 1).toUpperCase()),
-        el("strong", "", user.username), el("span", "category-badge", "Admin"));
+        el("strong", "", user.username), el("span", `category-badge${user.active === false ? " inactive-badge" : ""}`, user.active === false ? "Inaktiv" : "Admin"));
+      const password = document.createElement("input");
+      password.type = "password"; password.minLength = 12; password.maxLength = 256;
+      password.autocomplete = "new-password"; password.placeholder = "Nytt lösenord (minst 12 tecken)";
+      password.setAttribute("aria-label", `Nytt lösenord för ${user.username}`);
+      const reset = action("Återställ lösenord", "small-button", async () => {
+        if (password.value.length < 12 || password.value.length > 256) {
+          showError(new Error("Lösenordet måste vara 12–256 tecken."), $("#users-error")); return;
+        }
+        reset.disabled = true; toggle.disabled = true;
+        try {
+          await api(`/api/users/${encodeURIComponent(user.id)}/reset-password`, "POST", {password:password.value});
+          password.value = "";
+          if (isSelf) location.replace("/login");
+          else notify(`Lösenordet för ${user.username} har återställts.`);
+        } catch (error) { showError(error, $("#users-error")); }
+        finally { reset.disabled = false; toggle.disabled = isSelf; }
+      });
+      const toggle = action(user.active === false ? "Aktivera" : "Inaktivera", "small-button", async () => {
+        if (isSelf) return;
+        toggle.disabled = true; reset.disabled = true;
+        try {
+          await api(`/api/users/${encodeURIComponent(user.id)}`, "PUT", {active:user.active === false});
+          await loadUsers(); notify(user.active === false ? "Användaren har aktiverats." : "Användaren har inaktiverats.");
+        } catch (error) { showError(error, $("#users-error")); }
+        finally { toggle.disabled = false; reset.disabled = false; }
+      });
+      toggle.disabled = isSelf;
+      if (isSelf) toggle.title = "Du kan inte inaktivera ditt eget konto.";
+      row.append(password, reset, toggle);
       return row;
     }));
   } catch (error) { showError(error, $("#users-error")); }
@@ -391,10 +783,48 @@ $("#password-form").addEventListener("submit", async event => {
   } catch (error) { showError(error, $("#password-error")); }
   finally { $("#change-password-button").disabled = false; }
 });
+document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => $(`#${button.dataset.close}`).close()));
+$("#trash-button").addEventListener("click", () => {
+  $("#trash-dialog").showModal(); loadTrash();
+});
+$("#activity-button").addEventListener("click", () => {
+  $("#activity-dialog").showModal(); loadActivity();
+});
+$("#category-manage-button").addEventListener("click", () => {
+  $("#category-dialog").showModal(); loadCategoriesForManagement();
+});
+$("#category-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const categoryForm = event.currentTarget;
+  $("#category-error").hidden = true; $("#category-create").disabled = true;
+  try {
+    await api("/api/categories", "POST", {name:categoryForm.elements.name.value.trim(), parent:categoryForm.elements.parent.value || null});
+    categoryForm.reset(); await loadCategoriesForManagement(); notify("Kategorin har skapats.");
+  } catch (error) { showError(error, $("#category-error")); }
+  finally { $("#category-create").disabled = false; }
+});
+$("#admin-button").addEventListener("click", () => {
+  $("#admin-dialog").showModal(); loadAdmin();
+});
+$("#registration-save").addEventListener("click", async () => {
+  $("#registration-save").disabled = true; $("#admin-error").hidden = true;
+  try {
+    await api("/api/settings", "PUT", {registration_open:$("#registration-toggle").checked});
+    notify($("#registration-toggle").checked ? "Registreringen är öppen." : "Publik registrering är stängd.");
+  } catch (error) { showError(error, $("#admin-error")); }
+  finally { $("#registration-save").disabled = false; }
+});
+$("#backup-create").addEventListener("click", async () => {
+  $("#backup-create").disabled = true; $("#admin-error").hidden = true;
+  try { await api("/api/backups", "POST", {}); await loadAdmin(); notify("Säkerhetskopian har skapats."); }
+  catch (error) { showError(error, $("#admin-error")); }
+  finally { $("#backup-create").disabled = false; }
+});
 async function boot() {
   try {
     const user = await api("/api/me");
     csrf = user.csrf;
+    currentUser = user;
     $("#account-name").textContent = `${user.username} · Admin`;
     await load();
   } catch (error) { showError(error); }

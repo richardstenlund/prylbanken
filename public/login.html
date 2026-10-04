@@ -35,7 +35,8 @@ echo "Välkommen till Prylbanken"</pre>
         <p class="eyebrow">VÄLKOMMEN TILLBAKA</p>
         <h2>Logga in i ditt bibliotek.</h2>
         <p class="muted">En plats för allt som är bra att ha.</p>
-        <div class="auth-switch" role="group" aria-label="Välj inloggning eller registrering"><button type="button" id="login-tab" aria-pressed="true">Logga in</button><button type="button" id="register-tab" aria-pressed="false">Skapa konto</button></div>
+        <div class="auth-switch" role="group" aria-label="Välj inloggning eller registrering"><button type="button" id="login-tab" aria-pressed="true">Logga in</button><button type="button" id="register-tab" aria-pressed="false" hidden>Skapa konto</button></div>
+        <p id="registration-notice" class="muted" role="status" hidden></p>
         <p id="register-success" class="auth-success" role="status" hidden></p>
         <form id="login-form">
           <label>Användarnamn<input name="username" required minlength="3" maxlength="40" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Ditt användarnamn" autofocus></label>

@@ -4,6 +4,59 @@ En svensk, självhostad samlingssida för länkar, kodsnuttar, Docker-kommandon,
 spelservrar, SteamCMD, BAT-skript och bifogade filer. Responsiv layout, sökning,
 taggar, favoriter, redigering och säkerhetskopiering ingår.
 
+## Bibliotek och administration
+
+- Kodvisning med lokal syntaxmarkering och radnummer. Kopiering och nedladdning
+  använder originaltexten, inte radnumren.
+- Språk och eget nedladdningsnamn samt operativsystem, programversion, portar,
+  beroenden, testdatum och status för varje post.
+- Versionshistorik: återställ tidigare innehåll, metadata och bilagor.
+  En återställning skapar också en ny version.
+- Papperskorg: återställ borttagna poster eller radera dem permanent.
+  Permanent radering tar också bort postens historik.
+- Kategorier med underkategorier, namnbyte och flytt av innehåll vid radering.
+  Inbyggda kategorier kan byta namn och flyttas, men inte tas bort.
+- Aktivitetslogg för gemensamma ändringar och administration.
+- Kontohantering: skapa konton, inaktivera dem och sätt nya lösenord.
+  Inaktivering och lösenordsåterställning avslutar kontots sessioner.
+- Öppen registrering kan stängas och öppnas igen i administrationen.
+
+Alla aktiva användare är administratörer och delar samma bibliotek. Detta gäller
+även självregistrerade konton. Öppen registrering är avsedd för ett betrott nätverk,
+inte en oskyddad publik tjänst.
+
+### Säkerhetskopiering och återställning
+
+Automatiska fullständiga SQLite-säkerhetskopior tas dagligen i en **separat
+Docker-volym**, med **14 sparade kopior**. Du kan också skapa, ladda ned och
+återställa kopior från webbgränssnittet. Kopiorna innehåller bibliotek, bilagor,
+historik, konton och inställningar. Förvara nedladdade kopior säkert.
+
+14 dagliga kopior behålls. Manuella kopior och säkerhetskopior före återställning
+har var sin separat gräns på 14 kopior. Dagens första kopia tas vid start;
+servern kontrollerar sedan en gång i timmen om en ny dag har börjat (UTC).
+
+En full återställning ersätter nuvarande databas, tar först en säkerhetskopia av
+nuläget och loggar ut alla. Logga därefter in med ett konto och lösenord som fanns
+i den återställda kopian. JSON-exporten är en biblioteksöverföring, inte en full
+säkerhetskopia av konton och administration.
+
+En separat volym på samma Docker-värd skyddar inte mot förlust av hela värden eller
+disken. Ladda regelbundet ned en kopia till en annan dator eller ett separat
+backupsystem. Använd inte `docker compose down -v` när data ska bevaras:
+det tar bort volymerna.
+
+### Uppdatera en befintlig installation
+
+```sh
+cd prylbanken
+git pull --ff-only && sh install.sh
+```
+
+Databasen uppgraderas automatiskt vid start och befintliga poster, bilagor och
+konton bevaras. Installeraren behåller din befintliga `.env`. Ta gärna en kopia
+av datavolymen innan större uppgraderingar.
+
 ## Starta med Docker
 
 ### Enkel installation på en Linux Docker-host
@@ -62,7 +115,7 @@ administratörsbehörighet. Det finns inga privata samlingar eller separata rät
   från Basic-inloggningen används samma lösenord. Befintligt innehåll behålls.
 - Logga in via den nya inloggningssidan. Webbläsarens gamla Basic-inloggning
   används inte längre.
-- Alla som når inloggningssidan kan välja **Skapa konto** och registrera sig
+- När registreringen är öppen kan alla som når inloggningssidan välja **Skapa konto** och registrera sig
   utan inloggning eller inbjudan. Varje konto får ett unikt användarnamn och eget
   lösenord. Stora och små bokstäver räknas som samma namn; upptagna namn nekas.
   Efter registreringen loggar användaren in med sitt nya lösenord.
@@ -85,7 +138,8 @@ administratörsbehörighet. Det finns inga privata samlingar eller separata rät
   Registreringen tillåter högst fem giltigt formaterade försök per fem minuter
   och anslutande IP, inklusive försök med redan upptagna namn.
 - `APP_PASSWORD` används **bara för att skapa första kontot**. Att ändra `.env`
-  återställer inte ett befintligt lösenord. Behåll tillgången till minst ett konto;
+  återställer inte ett befintligt lösenord. Administratörer kan sätta ett nytt
+  lösenord och inaktivera konton. Behåll tillgången till minst ett konto;
   lösenordsåterställning via e-post och radering av konton ingår inte.
 - JSON-exporten innehåller biblioteket, inte konton eller sessioner. En
   fullständig Docker-volymbackup innehåller även dessa.
@@ -111,11 +165,12 @@ för privat åtkomst.
 - **Lägg till nytt:** välj kategori, titel, innehåll, anteckningar och taggar
   separerade med kommatecken. Valfri fil kan bifogas i alla kategorier.
 - IT-kategorier för Linux, Windows, nätverk, databaser, utveckling, automation,
-  säkerhet och dokumentation ingår. Välj **Egen kategori** för till exempel
-  Proxmox eller Kubernetes. Egna kategorier visas i sidomenyn efter sparandet.
+  säkerhet och dokumentation ingår. Använd **Hantera kategorier** för att skapa
+  till exempel Proxmox eller Kubernetes och välja överordnad kategori.
+  Egna kategorier visas i sidomenyn efter sparandet.
 - **Läs in kod från en textfil** läser UTF-8-filer på högst 200 kB till kodfältet,
   så att innehållet kan sökas och redigeras. Indrag och radbrytningar bevaras.
-- **Ladda ned text** sparar kodfältet som en fil. Använd en titel med filändelse,
+- **Ladda ned text** sparar kodfältet som en fil. Ange ett nedladdningsnamn eller använd en titel med filändelse,
   till exempel `backup.py`, för önskat filnamn. Annars väljs `.bat`, `.sh` eller
   `.sql` för motsvarande kategori och `.txt` för övriga kategorier.
 - Varje fil får vara högst **20 MB**. Filen lagras och laddas ned som en bilaga;
@@ -196,7 +251,10 @@ $env:APP_PASSWORD = 'ett-unikt-lokalt-testlosenord'
 python server.py
 ```
 
-Data hamnar i `data/` om `DATA_DIR` inte sätts.
+Data hamnar i `data/` om `DATA_DIR` inte sätts. Utanför Docker sparas
+SQLite-säkerhetskopior i `DATA_DIR/backups/` som standard; välj en annan plats
+med `BACKUP_DIR`. `BACKUPS_ENABLED=false` stänger av SQLite-säkerhetskopiering
+vid lokal körning.
 
 ```powershell
 python -m unittest discover -s tests -v

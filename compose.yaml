@@ -6,8 +6,10 @@ services:
     environment:
       APP_PASSWORD: ${APP_PASSWORD:?Ange APP_PASSWORD i .env (minst 12 tecken)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      BACKUP_DIR: /backups
     volumes:
       - prylbanken-data:/data
+      - prylbanken-backups:/backups
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -17,3 +19,4 @@ services:
 
 volumes:
   prylbanken-data:
+  prylbanken-backups:

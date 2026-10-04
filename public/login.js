@@ -17,6 +17,26 @@ function switchForm(register) {
 }
 document.querySelector("#login-tab").addEventListener("click", () => switchForm(false));
 document.querySelector("#register-tab").addEventListener("click", () => switchForm(true));
+async function loadRegistrationAvailability() {
+  const tab = document.querySelector("#register-tab");
+  const notice = document.querySelector("#registration-notice");
+  try {
+    const response = await fetch("/api/registration");
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Registreringsstatus kunde inte hämtas.");
+    tab.hidden = !result.registration_open;
+    document.querySelector(".login-help").hidden = !result.registration_open;
+    if (!result.registration_open) {
+      notice.textContent = "Kontoregistrering är stängd. Be en administratör skapa ditt konto.";
+      notice.hidden = false;
+    }
+  } catch (error) {
+    tab.hidden = true;
+    document.querySelector(".login-help").hidden = true;
+    notice.textContent = error.message;
+    notice.hidden = false;
+  }
+}
 registerForm.addEventListener("submit", async event => {
   event.preventDefault();
   const submit = document.querySelector("#register-button");
@@ -78,3 +98,4 @@ form.addEventListener("submit", async event => {
     button.textContent = "Logga in →";
   }
 });
+loadRegistrationAvailability();

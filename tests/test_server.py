@@ -20,6 +20,7 @@ class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
+        cls.backup_directory = tempfile.TemporaryDirectory()
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             cls.port = sock.getsockname()[1]
@@ -31,7 +32,8 @@ class ServerTests(unittest.TestCase):
     @classmethod
     def start(cls, **overrides):
         env = {**os.environ, "APP_PASSWORD": "integration-test-password",
-               "DATA_DIR": cls.directory.name, "PORT": str(cls.port), **overrides}
+               "DATA_DIR": cls.directory.name, "BACKUP_DIR": cls.backup_directory.name,
+               "PORT": str(cls.port), **overrides}
         cls.process = subprocess.Popen([sys.executable, str(ROOT / "server.py")],
                                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
@@ -51,6 +53,7 @@ class ServerTests(unittest.TestCase):
         cls.process.terminate()
         cls.process.wait(timeout=5)
         cls.directory.cleanup()
+        cls.backup_directory.cleanup()
 
     def setUp(self):
         with closing(sqlite3.connect(Path(self.directory.name) / "library.sqlite")) as db, db:
@@ -64,6 +67,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 200, body)
         type(self).cookie = headers["Set-Cookie"].split(";", 1)[0]
         type(self).csrf = self.request("GET", "/api/me")[1]["csrf"]
+        self.request("PUT", "/api/settings", {"registration_open": True})
 
     @classmethod
     def request(cls, method, path, payload=None, auth=True, extra=None):
@@ -99,6 +103,189 @@ class ServerTests(unittest.TestCase):
         basic = "Basic " + base64.b64encode(b"admin:integration-test-password").decode()
         self.assertEqual(self.request("GET", "/api/items", auth=False,
                                       extra={"Authorization": basic})[0], 401)
+
+    def test_metadata_roundtrip_and_partial_edit(self):
+        metadata = {"language": "python", "download_name": "backup.py", "os": "Linux",
+                    "program_version": "3.13", "ports": "8080/tcp", "dependencies": "Python",
+                    "tested_at": "2026-10-04", "status": "tested"}
+        item_id = self.create(**metadata)
+        row = next(item for item in self.request("GET", "/api/items")[1] if item["id"] == item_id)
+        for key, value in metadata.items():
+            self.assertEqual(row[key], value)
+        self.assertEqual(self.request("PUT", f"/api/items/{item_id}",
+                                      {"title": "Changed", "category": "kod", "content": "new"})[0], 200)
+        row = self.request("GET", "/api/items")[1][0]
+        for key, value in metadata.items():
+            self.assertEqual(row[key], value)
+        for bad in ({"language": "bad-language"}, {"status": "invented"},
+                    {"tested_at": "2026-02-31"}, {"download_name": "../secret.txt"}):
+            self.assertEqual(self.request("POST", "/api/items",
+                                          {"title": "Bad", "category": "kod", **bad})[0], 400)
+
+    def test_history_restores_content_metadata_and_file(self):
+        item_id = self.create(content="original\n", language="bash", download_name="original.sh",
+                              filename="original.txt", filedata="aGVq")
+        row = self.request("GET", "/api/items")[1][0]
+        self.assertEqual(self.request("PUT", f"/api/items/{item_id}", {
+            **row, "content": "changed\n", "language": "python", "download_name": "new.py",
+            "filename": "new.txt", "filedata": "bmV3"})[0], 200)
+        history = self.request("GET", f"/api/items/{item_id}/history")[1]
+        original = next(version for version in history if version["content"] == "original\n")
+        self.assertNotIn("filedata", original)
+        self.assertEqual(original["actor"], "admin")
+        self.assertEqual(self.request("POST", f'/api/items/{item_id}/history/{original["id"]}/restore')[0], 200)
+        row = self.request("GET", "/api/items")[1][0]
+        self.assertEqual(row["content"], "original\n")
+        self.assertEqual(row["language"], "bash")
+        self.assertEqual(row["download_name"], "original.sh")
+        _, file_content, headers = self.request("GET", f"/api/files/{item_id}")
+        self.assertEqual(file_content, b"hej")
+        self.assertIn("original.txt", headers["Content-Disposition"])
+        self.assertGreaterEqual(len(self.request("GET", f"/api/items/{item_id}/history")[1]), 3)
+
+    def test_trash_restore_and_permanent_delete(self):
+        item_id = self.create(filename="saved.txt", filedata="aGVq")
+        self.assertEqual(self.request("DELETE", f"/api/items/{item_id}")[0], 200)
+        self.assertEqual(self.request("GET", "/api/items")[1], [])
+        self.assertEqual(self.request("GET", f"/api/files/{item_id}")[0], 404)
+        trash = self.request("GET", "/api/trash")[1]
+        self.assertTrue(any(item["id"] == item_id for item in trash))
+        self.assertEqual(self.request("POST", f"/api/items/{item_id}/restore")[0], 200)
+        self.assertEqual(self.request("GET", f"/api/files/{item_id}")[1], b"hej")
+        self.assertNotEqual(self.request("DELETE", f"/api/trash/{item_id}")[0], 200)
+        self.request("DELETE", f"/api/items/{item_id}")
+        self.assertEqual(self.request("DELETE", f"/api/trash/{item_id}")[0], 200)
+        self.assertFalse(any(item["id"] == item_id for item in self.request("GET", "/api/trash")[1]))
+        self.assertEqual(self.request("GET", f"/api/files/{item_id}")[0], 404)
+
+    def test_category_hierarchy_rename_move_and_cycles(self):
+        status, parent, _ = self.request("POST", "/api/categories", {"name": "My Games", "parent": None})
+        self.assertEqual(status, 201, parent)
+        status, child, _ = self.request("POST", "/api/categories", {"name": "My Linux", "parent": parent["key"]})
+        self.assertEqual(status, 201, child)
+        item_id = self.create(category=child["key"])
+        self.assertEqual(self.request("PUT", f'/api/categories/{child["key"]}',
+                                      {"name": "Renamed Linux", "parent": parent["key"]})[0], 200)
+        self.assertEqual(self.request("PUT", f'/api/categories/{parent["key"]}',
+                                      {"name": "My Games", "parent": child["key"]})[0], 400)
+        self.assertEqual(self.request("DELETE", f'/api/categories/{child["key"]}', {"move_to": "kod"})[0], 200)
+        row = next(item for item in self.request("GET", "/api/items")[1] if item["id"] == item_id)
+        self.assertEqual(row["category"], "kod")
+
+    def test_registration_switch_persists(self):
+        self.assertEqual(self.request("PUT", "/api/settings", {"registration_open": False})[0], 200)
+        self.assertFalse(self.request("GET", "/api/registration", auth=False)[1]["registration_open"])
+        self.assertEqual(self.request("POST", "/api/register",
+                                      {"username": "notallowed", "password": "valid-long-password"}, auth=False)[0], 403)
+        self.process.terminate()
+        self.process.wait(timeout=5)
+        type(self).start()
+        self.assertFalse(self.request("GET", "/api/registration", auth=False)[1]["registration_open"])
+        self.assertEqual(self.request("PUT", "/api/settings", {"registration_open": True})[0], 200)
+
+    def test_builtin_category_rename_parent_and_delete_guard(self):
+        self.assertEqual(self.request("PUT", "/api/categories/linux",
+                                      {"name": "Linux servers", "parent": "kod"})[0], 200)
+        categories = self.request("GET", "/api/categories")[1]
+        linux = next(category for category in categories if category["key"] == "linux")
+        self.assertEqual((linux["name"], linux["parent"]), ("Linux servers", "kod"))
+        self.assertEqual(self.request("DELETE", "/api/categories/linux", {"move_to": "kod"})[0], 400)
+        self.request("PUT", "/api/categories/linux", {"name": "Linux", "parent": None})
+
+    def test_category_move_includes_trash_and_preserves_link_validation(self):
+        category = self.request("POST", "/api/categories", {"name": "Temporary"})[1]
+        item_id = self.create(category=category["key"], content="not a URL")
+        self.request("DELETE", f"/api/items/{item_id}")
+        self.assertEqual(self.request("DELETE", f'/api/categories/{category["key"]}',
+                                      {"move_to": "lankar"})[0], 400)
+        self.assertEqual(self.request("DELETE", f'/api/categories/{category["key"]}',
+                                      {"move_to": "linux"})[0], 200)
+        row = next(item for item in self.request("GET", "/api/trash")[1] if item["id"] == item_id)
+        self.assertEqual(row["category"], "linux")
+        self.assertEqual(self.request("POST", f"/api/items/{item_id}/restore")[0], 200)
+
+    def test_reset_revokes_existing_session_and_does_not_log_password(self):
+        password = "specific-secret-reset-value"
+        user = self.request("POST", "/api/users", {"username": "resetme", "password": "original-long-password"})[1]
+        headers = self.request("POST", "/api/login",
+                               {"username": "resetme", "password": "original-long-password"}, auth=False)[2]
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.assertEqual(self.request("POST", f'/api/users/{user["id"]}/reset-password', {"password": password})[0], 200)
+        self.assertEqual(self.request("GET", "/api/me", extra={"Cookie": cookie})[0], 401)
+        self.assertEqual(self.request("POST", "/api/login",
+                                      {"username": "resetme", "password": "original-long-password"}, auth=False)[0], 401)
+        self.assertNotIn(password, json.dumps(self.request("GET", "/api/activity")[1]))
+
+    def test_admin_disable_reset_and_session_revocation(self):
+        user = self.request("POST", "/api/users", {"username": "managed", "password": "managed-user-password"})[1]
+        cookie = self.request("POST", "/api/login",
+                              {"username": "managed", "password": "managed-user-password"}, auth=False)[2]["Set-Cookie"].split(";", 1)[0]
+        self.assertEqual(self.request("PUT", f'/api/users/{user["id"]}', {"active": False})[0], 200)
+        self.assertEqual(self.request("GET", "/api/me", extra={"Cookie": cookie})[0], 401)
+        self.assertEqual(self.request("POST", "/api/login",
+                                      {"username": "managed", "password": "managed-user-password"}, auth=False)[0], 401)
+        self.assertEqual(self.request("PUT", f'/api/users/{user["id"]}', {"active": True})[0], 200)
+        self.assertEqual(self.request("POST", f'/api/users/{user["id"]}/reset-password',
+                                      {"password": "managed-reset-password"})[0], 200)
+        self.assertEqual(self.request("POST", "/api/login",
+                                      {"username": "managed", "password": "managed-reset-password"}, auth=False)[0], 200)
+        me = self.request("GET", "/api/me")[1]
+        self.assertEqual(self.request("PUT", f'/api/users/{me["id"]}', {"active": False})[0], 400)
+
+    def test_activity_log_and_management_authentication(self):
+        item_id = self.create(title="Activity test")
+        self.request("DELETE", f"/api/items/{item_id}")
+        rows = self.request("GET", "/api/activity")[1]
+        self.assertTrue(any(row["actor"] == "admin" and str(item_id) in str(row["target"]) for row in rows))
+        self.assertLessEqual(len(rows), 200)
+        for path in ("/api/trash", "/api/categories", "/api/activity", "/api/backups", "/api/settings"):
+            self.assertEqual(self.request("GET", path, auth=False)[0], 401)
+        self.assertEqual(self.request("POST", "/api/backups", extra={"X-CSRF-Token": ""})[0], 403)
+
+    def test_backup_download_integrity_and_full_restore(self):
+        item_id = self.create(title="Backed up", filename="file.txt", filedata="aGVq")
+        status, body, _ = self.request("POST", "/api/backups")
+        self.assertIn(status, (200, 201), body)
+        files = self.request("GET", "/api/backups")[1]["files"]
+        self.assertTrue(files)
+        name = body.get("name") or max(files, key=lambda file: file["created"])["name"]
+        status, raw, headers = self.request("GET", f"/api/backups/{name}")
+        self.assertEqual(status, 200)
+        self.assertTrue(raw.startswith(b"SQLite format 3"))
+        self.assertIn("attachment", headers["Content-Disposition"])
+        destination = Path(self.backup_directory.name) / "verify-download.sqlite"
+        destination.write_bytes(raw)
+        try:
+            with closing(sqlite3.connect(destination)) as db:
+                self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        finally:
+            destination.unlink()
+        self.create(title="After backup")
+        self.assertEqual(self.request("POST", f"/api/backups/{name}/restore", {"confirm": False})[0], 400)
+        self.assertEqual(self.request("POST", f"/api/backups/{name}/restore", {"confirm": True})[0], 200)
+        self.assertEqual(self.request("GET", "/api/me")[0], 401)
+        status, _, headers = self.request("POST", "/api/login",
+                                         {"username": "admin", "password": "integration-test-password"}, auth=False)
+        self.assertEqual(status, 200)
+        type(self).cookie = headers["Set-Cookie"].split(";", 1)[0]
+        type(self).csrf = self.request("GET", "/api/me")[1]["csrf"]
+        rows = self.request("GET", "/api/items")[1]
+        self.assertEqual([item["title"] for item in rows], ["Backed up"])
+        self.assertEqual(self.request("GET", f"/api/files/{item_id}")[1], b"hej")
+
+    def test_corrupt_full_backup_does_not_replace_data(self):
+        self.create(title="Survives failed restore")
+        entry = self.request("POST", "/api/backups")[1]
+        path = Path(self.backup_directory.name) / entry["name"]
+        path.write_bytes(b"not SQLite")
+        try:
+            self.assertEqual(self.request("POST", f'/api/backups/{entry["name"]}/restore',
+                                          {"confirm": True})[0], 500)
+            self.assertTrue(self.request("GET", "/api/backups")[1]["last_error"])
+            self.assertEqual(self.request("GET", "/api/items")[1][0]["title"], "Survives failed restore")
+            self.assertEqual(self.request("GET", "/api/me")[0], 200)
+        finally:
+            path.unlink()
 
     def test_static_assets(self):
         for path in ("/", "/login", "/login.js", "/app.js", "/style.css"):
@@ -153,7 +340,8 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(self.request("POST", "/api/users",
                                           {"username": username, "password": password})[0], 400)
         users = self.request("GET", "/api/users")[1]
-        self.assertEqual(set(users[0]), {"id", "username", "created", "role"})
+        self.assertEqual(set(users[0]), {"id", "username", "created", "role", "active"})
+        self.assertTrue(users[0]["active"])
         with closing(sqlite3.connect(Path(self.directory.name) / "library.sqlite")) as db:
             stored = db.execute("SELECT password_hash FROM users WHERE username='admin'").fetchone()[0]
         self.assertNotIn("integration-test-password", stored)
@@ -313,12 +501,18 @@ class ServerTests(unittest.TestCase):
                                           "filename": "test.txt", "filedata": data})[0], 400)
 
     def test_backup_restore(self):
-        self.create(filename="file.txt", filedata="aGVq")
+        self.create(filename="file.txt", filedata="aGVq", language="python",
+                    download_name="helper.py", status="tested", tested_at="2026-10-04")
         backup = self.request("GET", "/api/backup")[1]
         self.assertEqual(backup["version"], 1)
         self.assertEqual(backup["items"][0]["filedata"], "aGVq")
+        self.assertEqual(backup["items"][0]["download_name"], "helper.py")
+        self.assertNotIn("users", backup)
+        self.assertNotIn("sessions", backup)
         self.assertEqual(self.request("POST", "/api/restore", backup)[0], 201)
-        self.assertEqual(len(self.request("GET", "/api/items")[1]), 2)
+        rows = self.request("GET", "/api/items")[1]
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["language"] == "python" and row["status"] == "tested" for row in rows))
 
     def test_import_is_atomic(self):
         payload = {"version": 1, "items": [{"title": "Valid", "category": "linux"},
@@ -480,10 +674,19 @@ class ServerTests(unittest.TestCase):
         self.process.terminate()
         self.process.wait(timeout=5)
         with closing(sqlite3.connect(Path(self.directory.name) / "library.sqlite")) as db, db:
-            for table in ("sessions", "users", "login_attempts"):
-                db.execute(f"DROP TABLE {table}")
-            db.execute("DROP INDEX items_example_key")
-            db.execute("ALTER TABLE items DROP COLUMN example_key")
+            db.execute("PRAGMA foreign_keys=OFF")
+            tables = [row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+            for table in tables:
+                db.execute('DROP TABLE "' + table.replace('"', '""') + '"')
+            db.execute("""CREATE TABLE items (
+                id INTEGER PRIMARY KEY, title TEXT NOT NULL, category TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0,
+                filename TEXT, filedata BLOB, created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+            db.execute("INSERT INTO items(id,title,category,filename,filedata) VALUES (?,?,?,?,?)",
+                       (item_id, "Legacy library", "custom-legacy", "legacy.txt", b"hej"))
         type(self).start()
         status, _, headers = self.request("POST", "/api/login",
                                          {"username": "admin", "password": "integration-test-password"}, auth=False)
@@ -492,6 +695,9 @@ class ServerTests(unittest.TestCase):
         rows = self.request("GET", "/api/items", extra={"Cookie": cookie})[1]
         self.assertEqual(rows[0]["title"], "Legacy library")
         self.assertEqual(self.request("GET", f"/api/files/{item_id}", extra={"Cookie": cookie})[1], b"hej")
+        self.assertEqual(rows[0]["language"], "plain")
+        categories = self.request("GET", "/api/categories", extra={"Cookie": cookie})[1]
+        self.assertTrue(any(category["key"] == "custom-legacy" for category in categories))
 
 
 if __name__ == "__main__":
