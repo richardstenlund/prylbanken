@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11151d">
+  <title>Prylbanken – ditt digitala förråd</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-icon">P</span> prylbanken<span class="brand-dot">.</span></a>
+    <p class="sidebar-label">DITT DIGITALA FÖRRÅD</p>
+    <nav id="navigation" aria-label="Kategorier"></nav>
+    <div class="sidebar-bottom"><span class="status-dot"></span> Lagring på din server<small>En plats för allt som är bra att ha.</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>Min samling <span class="crumb">/</span> <span id="breadcrumb">Allt innehåll</span></span><span class="server-badge">DOCKER • SELF-HOSTED</span></header>
+    <section class="page-heading"><div><p class="eyebrow">DITT PERSONLIGA IT-BIBLIOTEK</p><h1 id="page-title">Ditt nästa <span>”bra att ha”.</span></h1><p class="subtitle">Kod, filer och IT-kunskap. Sorterat i dina kategorier, redo när du behöver det.</p></div><button class="primary" id="add-button">＋ Lägg till nytt</button></section>
+    <section class="stats" aria-label="Statistik"><div><span class="stat-icon">▦</span><div><strong id="total">0</strong><small>Sparade saker</small></div></div><div><span class="stat-icon purple">⌘</span><div><strong id="commands">0</strong><small>Kod & kommandon</small></div></div><div><span class="stat-icon amber">☆</span><div><strong id="favorites">0</strong><small>Favoriter</small></div></div><div><span class="stat-icon blue">↥</span><div><strong id="files">0</strong><small>Uppladdade filer</small></div></div></section>
+    <section class="toolbar"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="Sök titel, kod, anteckningar eller taggar…" aria-label="Sök i samlingen"><kbd>/</kbd></label><select id="sort" aria-label="Sortering"><option value="new">Senast uppdaterade</option><option value="title">Titel A–Ö</option><option value="old">Äldst först</option></select><button id="export-button" class="secondary">↓ Exportera</button><button id="import-button" class="secondary">↑ Importera</button><input type="file" id="import-file" accept=".json,application/json" hidden></section>
+    <div class="section-title"><h2 id="collection-title">Allt innehåll</h2><span id="result-count">0 saker</span></div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <section id="cards" class="cards" aria-label="Sparat innehåll"></section>
+    <section id="empty" class="empty" hidden><div class="empty-icon">▧</div><h2 id="empty-title">Här börjar din samling.</h2><p id="empty-text">Spara din första länk, kodsnutt eller fil – och slipp leta nästa gång.</p><div class="empty-actions"><button id="first-button" class="primary">＋ Spara något</button><button id="examples-button" class="secondary">Lägg till start­exempel</button></div></section>
+    <footer>Bygg ditt eget lilla kunskapsbibliotek.<span>Filer och innehåll sparas i din Docker-volym.</span></footer>
+  </main>
+  <dialog id="editor"><form id="edit-form"><div class="dialog-heading"><div><p class="eyebrow">EN SAK MINDRE ATT KOMMA IHÅG</p><h2 id="editor-title">Lägg till nytt</h2></div><button type="button" class="icon-button close-dialog" aria-label="Stäng">×</button></div><label>Titel<input name="title" required maxlength="200" placeholder="T.ex. Starta min Valheim-server"></label><div class="form-row"><label>Kategori<select name="category" id="category-input"></select></label><label>Taggar<input name="tags" maxlength="500" placeholder="valheim, linux, hemma"></label></div><label id="custom-category-label" hidden>Egen kategori<input id="custom-category" maxlength="60" placeholder="T.ex. Proxmox, Kubernetes eller Python"></label><label class="upload">↥ Läs in kod från en textfil<span>UTF-8 • max 200 kB • innehållet blir sökbart och redigerbart</span><input id="code-file" type="file"></label><label id="content-label"><span id="content-caption">Kod, kommando eller text</span><textarea name="content" rows="7" maxlength="200000" spellcheck="false" placeholder="Klistra in det du vill spara…"></textarea></label><label>Anteckningar<textarea name="notes" rows="2" maxlength="10000" placeholder="Hur används det? Vad behöver du tänka på?"></textarea></label><label class="upload">↥ Bifoga en fil <span>Max 20 MB • även .bat, .sh, .zip och konfigurationsfiler</span><input id="attachment" type="file"></label><p id="existing-file" class="muted"></p><label class="checkbox"><input name="favorite" type="checkbox"> Markera som favorit</label><p id="form-error" class="error" role="alert" hidden></p><div class="dialog-footer"><button type="button" class="secondary close-dialog">Avbryt</button><button type="submit" class="primary" id="save-button">Spara i samlingen</button></div></form></dialog>
+  <dialog id="detail"><div class="dialog-heading"><div><p class="eyebrow" id="detail-category"></p><h2 id="detail-title"></h2></div><button class="icon-button close-detail" aria-label="Stäng">×</button></div><div id="detail-body"></div><div class="dialog-footer"><button class="secondary close-detail">Stäng</button><button class="primary" id="detail-edit">Redigera</button></div></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>
