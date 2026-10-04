@@ -329,18 +329,18 @@ class ServerTests(unittest.TestCase):
     def test_catalog_output_and_import_all(self):
         catalog = self.request("GET", "/api/examples")[1]
         self.assertEqual(len(catalog["packs"]), 9)
-        self.assertEqual(len(catalog["items"]), 120)
-        self.assertEqual(len({item["key"] for item in catalog["items"]}), 120)
-        self.assertEqual(sum(pack["count"] for pack in catalog["packs"]), 120)
+        self.assertEqual(len(catalog["items"]), 160)
+        self.assertEqual(len({item["key"] for item in catalog["items"]}), 160)
+        self.assertEqual(sum(pack["count"] for pack in catalog["packs"]), 160)
         for item in catalog["items"]:
             self.assertTrue(item["content"])
             self.assertIn("Referens: https://", item["notes"])
         packs = [pack["id"] for pack in catalog["packs"]]
         status, result, _ = self.request("POST", "/api/examples", {"packs": packs})
         self.assertEqual(status, 201)
-        self.assertEqual(result, {"added": 120, "skipped": 0})
+        self.assertEqual(result, {"added": 160, "skipped": 0})
         rows = self.request("GET", "/api/items")[1]
-        self.assertEqual(len(rows), 120)
+        self.assertEqual(len(rows), 160)
         self.assertTrue(any("Valheim" in row["title"] for row in rows))
         self.assertTrue(any("Counter-Strike 2" in row["title"] for row in rows))
 
@@ -398,10 +398,34 @@ class ServerTests(unittest.TestCase):
         self.request("PUT", f'/api/items/{row["id"]}', {**row, "content": "MY EDITED ORIGINAL"})
         packs = [pack["id"] for pack in catalog["packs"]]
         result = self.request("POST", "/api/examples", {"packs": packs})[1]
-        self.assertEqual(result, {"added": 60, "skipped": 60})
+        self.assertEqual(result, {"added": 100, "skipped": 60})
         rows = self.request("GET", "/api/items")[1]
-        self.assertEqual(len(rows), 120)
+        self.assertEqual(len(rows), 160)
         self.assertTrue(any(item["content"] == "MY EDITED ORIGINAL" for item in rows))
+
+    def test_game_expansion_platforms_and_install_ids(self):
+        catalog = self.request("GET", "/api/examples")[1]
+        self.assertEqual(next(pack["count"] for pack in catalog["packs"] if pack["id"] == "spel"), 68)
+        by_key = {item["key"]: item for item in catalog["items"]}
+        ids = {"zomboid": 380870, "unturned": 1110390, "gmod": 4020,
+               "l4d2": 222860, "svencoop": 276060, "dst": 343050, "vrising": 1829350}
+        for key, app_id in ids.items():
+            self.assertIn(f"+app_update {app_id} validate", by_key[f"{key}-install"]["content"])
+            self.assertIn("anonymous", by_key[f"{key}-install"]["content"])
+            self.assertIn(f"{key}-windows", by_key)
+            if key != "vrising":
+                self.assertIn(f"{key}-linux", by_key)
+        self.assertNotIn("vrising-linux", by_key)
+        for key in ("openttd", "mindustry", "teeworlds"):
+            self.assertIn(f"{key}-linux", by_key)
+            self.assertIn(f"{key}-windows", by_key)
+            self.assertNotIn(f"{key}-install", by_key)
+        self.assertIn("ServerHelper.sh", by_key["unturned-linux"]["content"])
+        self.assertIn("Steam Guard", by_key["game-tools-steamcmd-login"]["notes"])
+        self.assertEqual(self.request("POST", "/api/examples", {"packs": ["spel"]})[1],
+                         {"added": 68, "skipped": 0})
+        self.assertEqual(self.request("POST", "/api/examples", {"packs": ["spel"]})[1],
+                         {"added": 0, "skipped": 68})
 
     def test_catalog_requires_auth_and_valid_selection(self):
         self.assertEqual(self.request("GET", "/api/examples", auth=False)[0], 401)

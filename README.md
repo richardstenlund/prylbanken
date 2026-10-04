@@ -124,7 +124,7 @@ för privat åtkomst.
 - Filkategorin visar alla poster med bifogade filer.
 - Stjärnan markerar favoriter. Standardordningen visar favoriter först, därefter
   senast uppdaterade poster. `/` fokuserar sökfältet.
-- **Startbibliotek** låter dig välja bland nio paket med totalt **120 mallar**:
+- **Startbibliotek** låter dig välja bland nio paket med totalt **160 mallar**:
   spelservrar/SteamCMD, Docker, Linux/backup, Windows/PowerShell, nätverk/SSH och
   Git/Python/SQL samt containerstarter, serverprogram och skript/automation.
   Samma knapp finns i den tomma samlingen.
@@ -141,6 +141,16 @@ för privat åtkomst.
 - Spelmallarna omfattar Valheim, Rust, Palworld, Satisfactory, CS2, Team Fortress 2,
   Minecraft Java och Bedrock, Factorio, Terraria samt 7 Days to Die.
   Plattformar och installationsmetoder varierar per spel.
+- Spelpaketet innehåller nu **68 mallar för 21 spel och serververktyg**.
+  Ytterligare spel är Project Zomboid, Unturned, Garry's Mod, Left 4 Dead 2,
+  Sven Co-op, Don't Starve Together, V Rising, OpenTTD, Mindustry och Teeworlds.
+  SteamCMD-installation ingår där den används. Windows-/Linux-start finns
+  där respektive distribution stöds; ingen native Linux-start anges för V Rising.
+- Dessutom ingår SteamCMD-mallar för Windows, plattformsval, licenskrävande
+  interaktiv inloggning och appinformation; separat DST-grottserver, Factorio-
+  världsskapande, Minecraft-whitelist, konsolkommandon för säker avstängning
+  och checklistor för flera instanser och backup. Konsolkommandon ska köras
+  i spelets serverkonsol, inte i operativsystemets terminal.
 - Du kan förhandsvisa kommandon och referenser innan paketen läggs till. Alla
   mallar är redigerbara. Inga kommandon körs av webbplatsen. Anpassa sökvägar,
   lösenord, RAM, spelversion och portar innan du använder dem.

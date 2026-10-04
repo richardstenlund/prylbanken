@@ -1,7 +1,7 @@
 """Original command templates for optional library starter packs."""
 
 PACKS = [
-    {"id": "spel", "title": "Spelservrar & SteamCMD", "description": "Installation och startmallar för elva spel."},
+    {"id": "spel", "title": "Spelservrar & SteamCMD", "description": "SteamCMD, Windows- och Linux-starter för 21 spel samt serververktyg."},
     {"id": "docker", "title": "Docker & Compose", "description": "Status, loggar, felsökning och uppdatering."},
     {"id": "linux", "title": "Linux & backup", "description": "Disk, tjänster, processer och säkerhetskopior."},
     {"id": "windows", "title": "Windows & PowerShell", "description": "Tjänster, nätverk, loggar och filer."},
@@ -395,3 +395,144 @@ for key, pack, title, category, content, notes, source in [
     ("sql-read", "utveckling", "SQL – grundmall för läsning", "databaser", "SELECT id, title\nFROM items\nORDER BY id DESC\nLIMIT 20;", "För SQLite/PostgreSQL/MariaDB med motsvarande schema. Kör som läsbehörig användare; anpassa tabell och kolumner.", "https://www.sqlite.org/lang_select.html"),
 ]:
     add("extra-" + key, pack, title, category, content, notes, "bra-att-ha, drift, verktyg", source)
+
+game("zomboid", "Project Zomboid", 380870,
+     "bash start-server.sh -servername MinServer", "call StartServer64.bat -servername MinServer",
+     "Byt servernamn. Kör första starten interaktivt och välj adminlösenord när servern frågar. "
+     "Servernamnet bestämmer konfiguration och sparmapp. Kontrollera stöd för klientens build; "
+     "använd inte samma värld för olika builds utan backup.",
+     "https://pzwiki.net/wiki/Dedicated_server")
+game("unturned", "Unturned", 1110390,
+     "./ServerHelper.sh +LanServer/MinServer", 'call "%~dp0ServerHelper.bat" +LanServer/MinServer',
+     "LAN-mall med medföljande hjälpskript som sätter miljön. Byt ServerID MinServer. "
+     "Inställningar sparas under Servers/MinServer. Använd Save eller Shutdown i konsolen för att spara. "
+     "Internetserver kräver separat konfiguration och GSLT enligt dokumentationen.",
+     "https://docs.smartlydressedgames.com/en/stable/servers/steamcmd.html")
+game("gmod", "Garry's Mod", 4020,
+     "./srcds_run -game garrysmod -console +gamemode sandbox +map gm_construct +maxplayers 16 +sv_lan 1",
+     "srcds.exe -game garrysmod -console +gamemode sandbox +map gm_construct +maxplayers 16 +sv_lan 1",
+     "LAN-mall. Byt karta och gamemode. För publik drift måste GSLT och serverns plats ställas in enligt "
+     "Facepunchs regler. Workshop-tillägg kan köra kod; installera bara betrodda addons.",
+     "https://wiki.facepunch.com/gmod/Downloading_a_Dedicated_Server")
+game("l4d2", "Left 4 Dead 2", 222860,
+     "./srcds_run -game left4dead2 -console +map c1m1_hotel +sv_lan 1",
+     "srcds.exe -game left4dead2 -console +map c1m1_hotel +sv_lan 1",
+     "LAN-mall med första Dead Center-kartan. Byt karta och konfigurera server.cfg. "
+     "Spelarantal och spelläge styrs av spelet; extra slots kan kräva mods.",
+     "https://developer.valvesoftware.com/wiki/Left_4_Dead_2/Dedicated_server")
+game("svencoop", "Sven Co-op", 276060,
+     "./svends_run -console -port 27015 +map _server_start +sv_lan 1",
+     "svends.exe -console -port 27015 +map _server_start +sv_lan 1",
+     "LAN-mall. Kontrollera att kartan _server_start finns i din distribution; byt annars till installerad karta. "
+     "AppID avser dedicated server, inte klienten. Anpassa server.cfg och port vid flera instanser.",
+     "https://wiki.svencoop.com/wiki/Running_a_server")
+game("dst", "Don't Starve Together", 343050,
+     "cd bin\n./dontstarve_dedicated_server_nullrenderer -console -cluster Cluster_1 -shard Master",
+     'cd /d bin\ndontstarve_dedicated_server_nullrenderer.exe -console -cluster Cluster_1 -shard Master',
+     "För distributionens bin-mapp; 64-bitarsbinärer kan ligga i bin64 och ha suffix _x64. "
+     "Skapa Cluster_1, cluster.ini, Master/server.ini och ett giltigt cluster_token.txt från Klei. "
+     "Token är en hemlighet. Grottor körs som separat shard med egna inställningar.",
+     "https://forums.kleientertainment.com/forums/forum/83-dont-starve-together-dedicated-server-discussion/")
+game("vrising", "V Rising", 1829350, None,
+     'VRisingServer.exe -persistentDataPath ".\\server-data" -serverName "Min V Rising-server"',
+     "Windows-servermall. Skapa Settings under server-data och anpassa ServerHostSettings.json och "
+     "ServerGameSettings.json enligt rätt spelversion. Använd egna lösenord och separata portar för varje instans. "
+     "Native Linux-start ingår inte; använd inte den här EXE-filen som ett Linux-kommando.",
+     "https://github.com/StunlockStudios/vrising-dedicated-server-instructions")
+game("openttd", "OpenTTD", None,
+     "openttd -D", "openttd.exe -D",
+     "Kräver OpenTTD och dess basdata. Konfigurera openttd.cfg, servernamn och spel-/adminlösenord. "
+     "Versalt -D startar dedicated-läge. Använd identiska NewGRF och versioner på klient och server.",
+     "https://wiki.openttd.org/en/Manual/Dedicated%20server")
+game("mindustry", "Mindustry", None,
+     "java -jar server-release.jar", "java -jar server-release.jar",
+     "Hämta server-release.jar från projektets officiella releases och installera Java-versionen releasen kräver. "
+     "När konsolen startat: skriv help och sedan host KARTNAMN för en tillgänglig karta. "
+     "Matcha klientversion. JAR-starten ensam startar inte en karta.",
+     "https://mindustrygame.github.io/wiki/servers/")
+game("teeworlds", "Teeworlds", None,
+     "./teeworlds_srv -f serverconfig.cfg", "teeworlds_srv.exe -f serverconfig.cfg",
+     "Kräver Teeworlds-serverbinär, kartor och egen serverconfig.cfg. Ange servernamn, karta, speltyp och "
+     "starkt RCON-lösenord. Standardport är 8303; kontrollera rätt version för klienterna.",
+     "https://www.teeworlds.com/?page=docs&wiki=server_setup")
+
+for key, title, category, content, notes, source in [
+    ("steamcmd-windows", "SteamCMD – Windows-installationsmall", "steamcmd",
+     '@echo off\ncd /d "%~dp0"\nsteamcmd.exe +force_install_dir "C:\\GameServers\\MinServer" +login anonymous +app_update APPID validate +quit\n'
+     'if errorlevel 1 exit /b 1\npause\n',
+     "Byt APPID till spelets dedicated server-ID och installationsmappen till en absolut sökväg. "
+     "steamcmd.exe ska finnas bredvid BAT-filen. Stoppa servern och säkerhetskopiera världen först. "
+     "Inte alla spel tillåter anonymous.", "https://developer.valvesoftware.com/wiki/SteamCMD"),
+    ("steamcmd-platform", "SteamCMD – hämta Windows-filer från Linux", "steamcmd",
+     'steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir /srv/windows-server +login anonymous +app_update APPID validate +quit',
+     "Byt APPID och mapp. Detta laddar ned Windows-filer men gör dem inte körbara på Linux. "
+     "Wine/Proton-kompatibilitet är en separat fråga; använd native-server eller Windows-host när möjligt.",
+     "https://developer.valvesoftware.com/wiki/SteamCMD"),
+    ("steamcmd-login", "SteamCMD – interaktiv inloggning för licenskrävande spel", "steamcmd",
+     "steamcmd\n# Skriv sedan i SteamCMD-konsolen:\nforce_install_dir /srv/min-server\nlogin DITT_STEAMNAMN\napp_update APPID validate\nquit",
+     "Byt namn, APPID och mapp. Skriv lösenord/Steam Guard interaktivt när SteamCMD frågar; "
+     "lägg inte lösenord i kommandohistorik eller sparade kodsnuttar. Kräver rätt licens.",
+     "https://developer.valvesoftware.com/wiki/SteamCMD"),
+    ("steamcmd-inspect", "SteamCMD – kontrollera appinformation", "steamcmd",
+     "steamcmd +login anonymous +app_info_update 1 +app_info_print APPID +quit",
+     "Byt APPID. Visar den information som anonymt konto får se; vissa depots eller branches kräver licens.",
+     "https://developer.valvesoftware.com/wiki/SteamCMD"),
+    ("factorio-create", "Factorio – skapa en ny servervärld", "spelserver",
+     "./bin/x64/factorio --create ./saves/ny-varld.zip",
+     "Linux från Factorios installationsrot. Skapa saves-mappen först och använd ett nytt filnamn. "
+     "Starta sedan med --start-server och samma sökväg. Använd separat backup för befintliga världar.",
+     "https://wiki.factorio.com/Multiplayer"),
+    ("openttd-save", "OpenTTD – starta från sparfil", "spelserver",
+     "openttd -D -g ./saves/min-varld.sav",
+     "Kräver befintlig sparfil samt rätt version och NewGRF. Anpassa nätverksinställningar i openttd.cfg.",
+     "https://wiki.openttd.org/en/Manual/Dedicated%20server"),
+    ("minecraft-props", "Minecraft Java – privat server.properties-mall", "dokumentation",
+     "server-port=25565\nonline-mode=true\nwhite-list=true\nenforce-whitelist=true\n"
+     "enable-rcon=false\nmax-players=10\nmotd=Min privata Minecraft-server\n",
+     "Infoga relevanta rader i befintlig server.properties när servern är stoppad. "
+     "Kör whitelist add SPELARNAMN i konsolen för dina spelare. Hela filen ersätts inte av denna mall.",
+     "https://minecraft.wiki/w/Server.properties"),
+    ("minecraft-console", "Minecraft Java – spara och stoppa säkert", "spelserver",
+     "save-all flush\nstop",
+     "Skriv dessa i Minecraft-serverns konsol, inte i Linux-terminalen. Vänta tills servern avslutats innan "
+     "du säkerhetskopierar world-mappar eller uppdaterar JAR.",
+     "https://minecraft.wiki/w/Commands/save-all"),
+    ("unturned-console", "Unturned – spara och avsluta", "spelserver",
+     "Save\nShutdown",
+     "Kommandon för spelets serverkonsol, inte operativsystemets skal. Vänta på avslut före kopiering av Servers-mappen.",
+     "https://docs.smartlydressedgames.com/en/stable/servers/server-hosting.html"),
+    ("dst-caves", "Don't Starve Together – separat grottserver", "spelserver",
+     "cd bin\n./dontstarve_dedicated_server_nullrenderer -console -cluster Cluster_1 -shard Caves",
+     "Starta som separat process bredvid Master-sharden. Kräver Caves/server.ini och korrekta shard-ID, "
+     "masteranslutning och världskonfiguration enligt Klei. Använd rätt bin/bin64 för din distribution.",
+     "https://forums.kleientertainment.com/forums/forum/83-dont-starve-together-dedicated-server-discussion/"),
+    ("zomboid-console", "Project Zomboid – spara och avsluta", "spelserver",
+     "save\nquit",
+     "Kör i Zomboid-serverkonsolen. Spara världen och vänta på avslut före backup av Zomboid-profilmappen.",
+     "https://pzwiki.net/wiki/Dedicated_server"),
+    ("game-isolation", "Spelservrar – checklista för flera instanser", "dokumentation",
+     "# En separat spelserverinstans behöver:\n"
+     "# 1. Egen spar-/profilkatalog och konfigurationsfil.\n"
+     "# 2. Unika game-, query- och adminportar enligt spelguiden.\n"
+     "# 3. Egen systemd-tjanst, container eller terminalsession.\n"
+     "# 4. Egen backupplan och testad aterstallning.\n"
+     "# 5. Tillrackligt RAM och diskutrymme.\n",
+     "Ändra inte alla spel till samma port. Query och RCON kan kräva andra protokoll/portar än själva spelet. "
+     "Ge spelprocessen bara rättigheter till dess egna filer.",
+     "https://developer.valvesoftware.com/wiki/SteamCMD"),
+    ("game-ports", "Spelservrar – kontrollera lyssnande portar på Linux", "natverk",
+     "ss -tuln\n# Om du har rattigheter att se processerna:\nss -tulnp",
+     "Jämför med spelets guide. En TCP-portkontroll bevisar inte att UDP fungerar. "
+     "Använd spelets klient för att testa anslutning och kontrollera serverloggen.",
+     "https://man7.org/linux/man-pages/man8/ss.8.html"),
+    ("game-backup", "Spelservrar – backupchecklista före uppdatering", "dokumentation",
+     "# Stoppa med spelets egen save/stop/shutdown-funktion.\n"
+     "# Kopiera varldar, profiler, konfiguration och modlista.\n"
+     "# Notera serverversion, branch och startargument.\n"
+     "# Testa aterstallning i en separat instans utan att ersatta originalet.\n"
+     "# Uppdatera forst nar backupen har verifierats.\n",
+     "SteamCMD validate kan ersätta originalfiler men är inte en backup. Klient och server kan behöva samma "
+     "version eller mods. Lagra hemliga server-/RCON-lösenord separat och säkert.",
+     "https://developer.valvesoftware.com/wiki/SteamCMD"),
+]:
+    add("game-tools-" + key, "spel", title, category, content, notes, "spelserver, steamcmd, drift", source)
