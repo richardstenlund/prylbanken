@@ -1,0 +1,11 @@
+# Copy to compose.override.yaml to enable an already-mounted NAS directory.
+services:
+  prylbanken:
+    environment:
+      EXTERNAL_BACKUP_DIR: /external-backups
+    volumes:
+      - type: bind
+        source: ${NAS_BACKUP_PATH:?Ange NAS_BACKUP_PATH i .env till en monterad NAS-katalog}
+        target: /external-backups
+        bind:
+          create_host_path: false

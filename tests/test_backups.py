@@ -90,3 +90,50 @@ class BackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager.create()
         self.assertFalse(self.manager.status()["enabled"])
+
+    def enable_external(self):
+        self.external = self.root / "nas"
+        self.external.mkdir()
+        (self.external / ".prylbanken-backup-target").touch()
+        self.manager.external_directory = self.external
+
+    def test_external_copy_is_byte_verified_and_corruption_repaired(self):
+        self.enable_external()
+        entry = self.manager.create()
+        original = self.manager.path(entry["name"])
+        copy = self.external / entry["name"]
+        self.assertEqual(original.read_bytes(), copy.read_bytes())
+        self.assertTrue(self.manager.status()["external"]["last_success"])
+        copy.write_bytes(b"corrupt copy")
+        self.manager.sync_external()
+        self.assertEqual(original.read_bytes(), copy.read_bytes())
+        self.assertEqual(list(self.external.glob("*.pending")), [])
+
+    def test_external_missing_mount_reports_error_keeps_local_and_retries(self):
+        self.enable_external()
+        marker = self.external / ".prylbanken-backup-target"
+        marker.unlink()
+        with self.assertLogs(level="ERROR"), self.assertRaises(OSError):
+            self.manager.create()
+        self.assertEqual(len(self.manager.files()), 1)
+        self.assertTrue(self.manager.status()["external"]["last_error"])
+        self.assertEqual(list(self.external.glob("*.sqlite")), [])
+        marker.touch()
+        self.manager.sync_external()
+        self.assertIsNone(self.manager.status()["external"]["last_error"])
+        self.assertEqual(len(list(self.external.glob("*.sqlite"))), 1)
+
+    def test_external_retention_exactly_fourteen_and_unrelated_files_kept(self):
+        self.enable_external()
+        for day in range(1, 21):
+            (self.external / f"daily-2000-01-{day:02d}.sqlite").touch()
+        unrelated = self.external / "personal.sqlite"
+        unrelated.write_bytes(b"untouched")
+        self.manager.create("daily")
+        self.assertEqual(len(list(self.external.glob("daily-*.sqlite"))), 14)
+        self.assertEqual(unrelated.read_bytes(), b"untouched")
+
+    def test_external_same_directory_is_rejected(self):
+        self.manager.external_directory = self.manager.directory
+        with self.assertLogs(level="ERROR"), self.assertRaises(ValueError):
+            self.manager.create()

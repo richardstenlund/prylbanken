@@ -59,7 +59,7 @@ registerForm.addEventListener("submit", async event => {
     form.elements.username.value = result.username;
     form.elements.password.value = "";
     const success = document.querySelector("#register-success");
-    success.textContent = `Kontot ${result.username} är skapat! Du är administratör. Logga in med ditt lösenord.`;
+    success.textContent = `Kontot ${result.username} är skapat med läsbehörighet. Logga in med ditt lösenord. En administratör kan ändra din roll.`;
     success.hidden = false;
     form.elements.password.focus();
   } catch (error) {
@@ -89,7 +89,7 @@ form.addEventListener("submit", async event => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Inloggningen misslyckades.");
-    location.replace("/");
+    location.replace("/" + (location.hash.startsWith("#capture=") && location.hash.length <= 18000 ? location.hash : ""));
   } catch (error) {
     errorBox.textContent = error.message;
     errorBox.hidden = false;

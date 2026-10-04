@@ -20,10 +20,46 @@ taggar, favoriter, redigering och säkerhetskopiering ingår.
 - Kontohantering: skapa konton, inaktivera dem och sätt nya lösenord.
   Inaktivering och lösenordsåterställning avslutar kontots sessioner.
 - Öppen registrering kan stängas och öppnas igen i administrationen.
+- Mallvariabler, bokmärkesknapp, avancerade och sparade sökningar,
+  projektsamlingar och import av flera filer med förhandsvisning.
 
-Alla aktiva användare är administratörer och delar samma bibliotek. Detta gäller
-även självregistrerade konton. Öppen registrering är avsedd för ett betrott nätverk,
-inte en oskyddad publik tjänst.
+Alla konton delar samma bibliotek, men har olika behörigheter. Befintliga konton
+behåller administratörsrollen vid uppgradering. **Nya självregistrerade konton
+blir läsare**; administratörer kan ändra deras roll. Även läsare kan se biblioteket
+och ladda ned bilagor. Begränsa därför öppen registrering till betrodda användare.
+
+### Snabbare användning
+
+- **Mallvariabler:** skriv exempelvis
+  `start --name "{{server_name}}" --ip {{ip}} --port {{port}}` i kodfältet.
+  Öppna posten, fyll i variablerna under **Anpassa mall** och välj **Generera
+  kommando**. Kopiera eller ladda ned resultatet. Namn använder a–z/A–Z,
+  siffror och understreck, börjar med bokstav/understreck och är högst 40 tecken.
+  Värden ersätts bokstavligt, utan shell-escaping eller rekursiv ersättning.
+  Kontrollera själv citattecken och argument. Variabelvärden sparas inte i
+  databasen, och Prylbanken kör aldrig kommandot.
+  Redigeringsformuläret har färdiga variabelexempel för Docker, SteamCMD och BAT.
+- **Spara från webbläsaren:** dra länken **Spara i Prylbanken** till
+  bokmärkesfältet. Klicka på bokmärket på en annan webbsida för att öppna
+  Prylbankens formulär med titel och länk. Inloggning och redigerarbehörighet
+  krävs. Bekräfta genom att spara formuläret; ingen extern sida hämtas av servern.
+  Vissa webbsidor/webbläsare blockerar bokmärkeskript; klistra då in länken manuellt.
+- **Sökning:** alla sökord måste finnas i posten. Taggfiltret matchar hela taggar,
+  och alla kommaseparerade taggar måste finnas. Kombinera med **Bara bilagor**,
+  **Inkludera underkategorier**, projekt, OS, språk och status.
+  **Spara sökning** sparar filter och sortering för ditt konto, inte en kopia
+  av träffarna. Sökningarna finns kvar efter omstart och visas inte för andra konton.
+- **Projektsamlingar:** skapa till exempel ”Hemmaserver” eller ”Valheim”.
+  Välj projekt i postens redigeringsformulär. En post kan ingå i flera projekt
+  oavsett kategori. Ett borttaget projekt raderar inte posterna.
+- **Flera filer:** välj eller dra in upp till 50 filer, sammanlagt högst 20 MB.
+  Välj kategori och automatisk avkänning, kodtext eller bilagor. Text läses som
+  UTF-8 med högst 200 kB per fil; binära/större filer ska importeras som bilagor.
+  Förhandsvisningen låter dig ändra titlar och välja bort filer.
+  Dubbletter kontrolleras både före och vid import: en identisk kombination
+  av kodtext och bilageinnehåll i aktivt bibliotek eller samma import. De hoppas över som
+  standard, men kan tillåtas uttryckligen. Poster i papperskorgen räknas inte
+  som dubbletter. Ogiltig post avbryter hela importen.
 
 ### Säkerhetskopiering och återställning
 
@@ -45,6 +81,46 @@ En separat volym på samma Docker-värd skyddar inte mot förlust av hela värde
 disken. Ladda regelbundet ned en kopia till en annan dator eller ett separat
 backupsystem. Använd inte `docker compose down -v` när data ska bevaras:
 det tar bort volymerna.
+
+### Automatisk backup till NAS
+
+NAS-backup är **valfri och avstängd tills du konfigurerar ett mål**.
+Montera först din NAS på Linux-värden med operativsystemets SMB/NFS-stöd.
+Använd en separat, befintlig katalog för Prylbanken. Exempel:
+
+```sh
+mountpoint /mnt/nas &&
+mkdir -p /mnt/nas/prylbanken &&
+touch /mnt/nas/prylbanken/.prylbanken-backup-target &&
+cp compose.nas.yaml compose.override.yaml
+```
+
+Om du redan har en `compose.override.yaml`, sammanfoga NAS-inställningarna med
+den i stället för att skriva över filen.
+Fortsätt bara om `mountpoint` bekräftar att NAS är monterad. Lägg till
+`NAS_BACKUP_PATH=/mnt/nas/prylbanken` i din befintliga `.env` och ge containerns
+`app`-användare läs- och skrivrättigheter till katalogen. Använd NAS-monterings-
+inställningar/ACL eller lämpligt ägarskap, inte allmänna `777`-rättigheter.
+Skapa inte markörfilen i en omonterad lokal reservkatalog.
+**NAS-monteringen ska ske innan containern startas, även efter omstart av värden.**
+Kör därefter `sh install.sh`. Compose läser den lokala, Git-ignorerade
+`compose.override.yaml` automatiskt. Standardinstallationen ändras inte.
+
+Nya lokala kopior skickas till NAS som temporära filer, kontrollsumman verifieras
+med SHA-256 och filen publiceras sedan genom namnbyte. Även NAS behåller högst
+14 kopior av vardera typen daglig/manuell/före återställning. Endast Prylbankens
+namngivna backupfiler gallras; använd ändå en dedikerad katalog.
+Misslyckanden visas under **Administration**, loggas i serverloggen och
+försöks igen varje timme. Den lokala kopian behålls när NAS-kopieringen misslyckas;
+en manuell begäran visar då fel, inte ett falskt framgångsmeddelande.
+En saknad katalog eller markörfil behandlas som ett fel, inte som lyckad extern backup.
+
+För lokal körning utan Docker kan `EXTERNAL_BACKUP_DIR` ange den monterade
+NAS-katalogen direkt. Samma markörfil krävs. NAS-kopior innehåller också
+konton, lösenordshashar, sessioner och sparade sökningar; skydda katalogen och
+transporten. För återställning från NAS, kopiera den valda `.sqlite`-filen med
+oförändrat namn till den lokala backupvolymen, ge `app` läsrättigheter och
+använd **Full återställning** i gränssnittet.
 
 ### Uppdatera en befintlig installation
 
@@ -106,8 +182,8 @@ finns kvar i `.env` även om bygget misslyckas.
 
 Allt sparas i SQLite i den namngivna Docker-volymen `prylbanken-data`, inklusive
 filer. Inga externa tjänster, typsnitt eller beroenden behövs. Innehållet är inte
-krypterat på disk. Biblioteket delas av alla användare; alla konton har
-administratörsbehörighet. Det finns inga privata samlingar eller separata rättigheter.
+krypterat på disk. Biblioteket och projektsamlingarna delas av alla användare;
+det finns inga privata innehållssamlingar. Sparade sökningar hör till respektive konto.
 
 ## Inloggning och användare
 
@@ -119,15 +195,21 @@ administratörsbehörighet. Det finns inga privata samlingar eller separata rät
   utan inloggning eller inbjudan. Varje konto får ett unikt användarnamn och eget
   lösenord. Stora och små bokstäver räknas som samma namn; upptagna namn nekas.
   Efter registreringen loggar användaren in med sitt nya lösenord.
-- Klicka på **Användare** för att se konton eller skapa en administratör åt någon annan.
+- Administratörer kan under **Användare** skapa konton och välja eller ändra roll.
+  Övriga användare har **Mitt konto** för eget lösenordsbyte.
 - Användarnamn innehåller 3–40 tecken (a–z, siffror, punkt, bindestreck eller
   understreck) och sparas med små bokstäver. Lösenord kräver 12–256 tecken.
-- Alla användare kan läsa, redigera och radera hela biblioteket, exportera filer
-  och skapa fler administratörer. **Öppen registrering ger alla som kan nå sidan
-  full administratörsåtkomst till biblioteket.** Begränsa nätverksåtkomsten med
-  exempelvis ett betrott LAN eller VPN. HTTPS skyddar trafiken men begränsar
-  inte vem som får skapa ett konto.
-- Under **Användare → Byt ditt lösenord** kan användaren ändra sitt eget lösenord.
+- **Läsare:** kan läsa gemensamt innehåll, historik och papperskorg, kopiera/ladda ned
+  text och bilagor, exportera biblioteket, använda mallvariabler och spara egna sökningar.
+- **Redigerare:** kan dessutom skapa/ändra poster, importera, ändra kategorier och
+  projektsamlingar, flytta till papperskorgen och återställa poster/versioner.
+- **Administratörer:** kan dessutom hantera konton/roller, registrering, aktivitetslogg,
+  fulla SQLite-säkerhetskopior och permanent radering. Rollbyte återkallar sessioner.
+  Det egna kontot kan inte inaktiveras eller ändra roll; ett aktivt adminkonto måste finnas.
+- Öppen registrering ger nya konton **läsåtkomst till allt gemensamt innehåll**.
+  Begränsa nätverksåtkomsten med ett betrott LAN eller VPN. HTTPS krypterar trafiken
+  men begränsar inte vem som kan registrera sig.
+- Under **Mitt konto/Användare → Byt ditt lösenord** kan användaren ändra sitt eget lösenord.
   Alla användarens sessioner återkallas och ny inloggning krävs.
 - **Logga ut** återkallar den aktuella sessionen. Sessioner gäller i 12 timmar
   och sparas i databasen så att en containeromstart inte loggar ut alla.
@@ -258,4 +340,5 @@ vid lokal körning.
 
 ```powershell
 python -m unittest discover -s tests -v
+node --test tests/library-tools.test.js
 ```

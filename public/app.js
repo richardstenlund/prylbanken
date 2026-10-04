@@ -13,6 +13,9 @@ const builtInCategories = [
 ];
 let categories = [...builtInCategories], items = [], active = "all", editing = null, detailItem = null, loading = true;
 let currentHistoryItem = null, currentHistory = [], currentUser = null;
+const roleName = role => ({admin:"Administratör", editor:"Redigerare", reader:"Läsare"})[role] || role;
+const canEdit = () => currentUser && currentUser.role !== "reader";
+const isAdmin = () => currentUser?.role === "admin";
 let toastTimer;
 let csrf = "";
 const form = $("#edit-form");
@@ -68,6 +71,7 @@ async function loadHistory() {
             finally { preview.disabled = false; }
           })
         );
+        $("#history-preview .primary").hidden = !canEdit();
       });
       row.append(info, preview);
       $("#history-list").append(row);
@@ -101,6 +105,8 @@ async function loadTrash() {
         finally { restore.disabled = false; permanent.disabled = false; }
       });
       row.append(info, restore, permanent);
+      restore.hidden = !canEdit();
+      permanent.hidden = !isAdmin();
       $("#trash-list").append(row);
     });
   } catch (error) { showError(error, $("#trash-error")); }
@@ -220,7 +226,8 @@ function activityName(action) {
     "category.delete": "Kategori borttagen", "category.restore": "Kategori återställd",
     "user.create": "Konto skapat", "user.login": "Inloggning", "user.enable": "Konto aktiverat",
     "user.disable": "Konto inaktiverat", "user.reset-password": "Lösenord återställt",
-    "user.password": "Lösenord ändrat", "settings.registration": "Registrering ändrad",
+    "user.password": "Lösenord ändrat", "user.role": "Roll ändrad", "settings.registration": "Registrering ändrad",
+    "project.create": "Projekt skapat", "project.update": "Projekt ändrat", "project.delete": "Projekt borttaget",
     "backup.create": "Säkerhetskopia skapad", "database.restore": "Databas återställd"
   })[action] || action;
 }
@@ -232,6 +239,11 @@ async function loadAdmin() {
     const [settings, backups] = await Promise.all([api("/api/settings"), api("/api/backups")]);
     $("#registration-toggle").checked = Boolean(settings.registration_open);
     $("#backup-status").textContent = `${backups.enabled ? "Automatiska säkerhetskopior är aktiverade." : "Automatiska säkerhetskopior är avstängda."}${backups.last_error ? ` Senaste fel: ${backups.last_error}` : ""}`;
+    const external = backups.external;
+    if (external) $("#backup-status").textContent += external.enabled
+      ? ` NAS: ${external.directory}. ${external.last_error ? `Fel: ${external.last_error}` :
+        external.last_success ? `Verifierad kopia: ${formatDate(external.last_success)}` : "Ingen extern kopia verifierad ännu."}`
+      : " Extern NAS-backup är inte konfigurerad.";
     if (!backups.files.length) $("#backup-list").append(el("p", "muted", "Inga säkerhetskopior tillgängliga."));
     backups.files.forEach(file => {
       const row = el("article", "management-row backup-row");
@@ -287,7 +299,8 @@ async function api(path, method = "GET", body) {
 async function load() {
   $("#error").hidden = true;
   try {
-    const [loadedItems, loadedCategories] = await Promise.all([api("/api/items"), api("/api/categories")]);
+    const [loadedItems, loadedCategories, loadedProjects, loadedSearches] = await Promise.all([
+      api("/api/items"), api("/api/categories"), api("/api/projects"), api("/api/searches")]);
     items = loadedItems;
     categories = builtInCategories.slice(0, 2);
     const categoryData = loadedCategories.filter(category => !["all", "favorites"].includes(category.key)).map(category => {
@@ -299,19 +312,15 @@ async function load() {
       if (!categories.some(c => c[0] === item.category)) categories.push([item.category, item.category, "▧"]);
     });
     if (!categories.some(category => category[0] === active)) active = "all";
+    refreshLibraryTools(loadedProjects, loadedSearches);
     loading = false; populateFilters(); render();
   }
   catch (error) { showError(error); }
 }
 function filtered() {
-  const query = $("#search").value.toLocaleLowerCase("sv");
-  return items.filter(item =>
-    (active === "all" || (active === "favorites" ? item.favorite : active === "filer" ? item.filename !== null || item.category === "filer" : item.category === active)) &&
-    [item.title, item.content, item.notes, item.tags, item.filename || "", item.os || "", item.program_version || "", item.ports || "", item.dependencies || "", item.language || ""].join(" ").toLocaleLowerCase("sv").includes(query) &&
-    (!$("#filter-os").value || item.os === $("#filter-os").value) &&
-    (!$("#filter-status").value || item.status === $("#filter-status").value) &&
-    (!$("#filter-language").value || item.language === $("#filter-language").value)
-  ).sort((a, b) => {
+  const filters = currentFilters();
+  const keys = filters.descendants ? categoryDescendants(active) : new Set([active]);
+  return items.filter(item => LibraryTools.matches(item, filters, keys)).sort((a, b) => {
     if ($("#sort").value === "title") return a.title.localeCompare(b.title, "sv");
     const order = a.updated.localeCompare(b.updated) || a.id - b.id;
     return $("#sort").value === "old" ? order : b.favorite - a.favorite || -order;
@@ -320,7 +329,8 @@ function filtered() {
 function count(key) {
   if (key === "all") return items.length;
   if (key === "favorites") return items.filter(i => i.favorite).length;
-  return items.filter(i => key === "filer" ? i.filename !== null || i.category === "filer" : i.category === key).length;
+  const keys = $("#filter-descendants").checked ? categoryDescendants(key) : new Set([key]);
+  return items.filter(i => key === "filer" ? i.filename !== null || i.category === "filer" : keys.has(i.category)).length;
 }
 function action(label, className, handler) {
   const button = el("button", className, label);
@@ -451,7 +461,7 @@ function render() {
   const first = items.length === 0;
   $("#empty-title").textContent = first ? "Här börjar din samling." : "Inga träffar den här gången.";
   $("#empty-text").textContent = first ? "Spara din första länk, kodsnutt eller fil – och slipp leta nästa gång." : "Prova en annan sökning eller lägg till något i den här kategorin.";
-  $("#examples-button").hidden = !first;
+  $("#examples-button").hidden = !first || !canEdit();
 }
 function categoryDepth(key, seen = new Set()) {
   const category = categories.find(entry => entry[0] === key);
@@ -479,6 +489,7 @@ function card(item) {
   });
   favorite.setAttribute("aria-label", item.favorite ? "Ta bort favorit" : "Markera som favorit");
   favorite.setAttribute("aria-pressed", String(Boolean(item.favorite)));
+  favorite.disabled = !canEdit();
   top.append(el("span", `category-badge ${item.category}`, categoryName(item.category)), favorite);
   const title = el("h3");
   title.append(action(item.title, "title-button", () => showDetail(item)));
@@ -505,7 +516,7 @@ function card(item) {
     actions.append(action("Kopiera", "small-button", () => copy(item.content)));
     actions.append(action("↓ Text", "small-button", () => downloadText(item)));
   }
-  actions.append(action("Redigera", "small-button", () => openEditor(item)));
+  if (canEdit()) actions.append(action("Redigera", "small-button", () => openEditor(item)));
   const remove = action("×", "small-button delete-button", async () => {
     if (!confirm(`Flytta "${item.title}" till papperskorgen? Du kan återställa den senare.`)) return;
     remove.disabled = true;
@@ -514,7 +525,8 @@ function card(item) {
     finally { remove.disabled = false; }
   });
   remove.setAttribute("aria-label", `Ta bort ${item.title}`);
-  actions.append(remove); bottom.append(actions); node.append(tags, bottom);
+  if (canEdit()) actions.append(remove);
+  bottom.append(actions); node.append(tags, bottom);
   return node;
 }
 async function copy(text) {
@@ -526,9 +538,11 @@ async function copy(text) {
   } catch (error) { showError(error); }
 }
 function openEditor(item = null) {
+  if (!canEdit()) { showError(new Error("Läsare kan inte ändra biblioteket.")); return; }
   editing = item;
   form.reset();
   populateCategories();
+  populateProjectChoices(item);
   $("#form-error").hidden = true;
   $("#editor-title").textContent = item ? "Redigera sparad sak" : "Lägg till nytt";
   ["title", "download_name", "category", "content", "notes", "tags", "language", "os",
@@ -564,6 +578,7 @@ function showDetail(item) {
   if (metadata) body.append(el("p", "metadata-summary detail-metadata", metadata));
   if (item.notes) body.append(el("p", "detail-notes", item.notes));
   if (item.filename !== null) body.append(fileLink(item));
+  appendItemTools(body, item);
   $("#detail").showModal();
 }
 function readFile(file) {
@@ -582,6 +597,7 @@ form.addEventListener("submit", async event => {
     const payload = Object.fromEntries(["title", "download_name", "category", "content", "notes", "tags", "language",
       "os", "program_version", "ports", "dependencies", "tested_at", "status"].map(name => [name, form.elements[name].value]));
     payload.favorite = form.elements.favorite.checked;
+    payload.project_ids = [...$("#editor-projects").querySelectorAll("input:checked")].map(input => Number(input.value));
     const file = $("#attachment").files[0];
     if (file) {
       if (file.size > 20 * 1024 * 1024) throw new Error("Filen får vara högst 20 MB.");
@@ -712,7 +728,20 @@ async function loadUsers() {
       const row = el("div", "user-row");
       const isSelf = currentUser && user.username === currentUser.username;
       row.append(el("span", "user-avatar", user.username.slice(0, 1).toUpperCase()),
-        el("strong", "", user.username), el("span", `category-badge${user.active === false ? " inactive-badge" : ""}`, user.active === false ? "Inaktiv" : "Admin"));
+        el("strong", "", user.username), el("span", `category-badge${user.active === false ? " inactive-badge" : ""}`, user.active === false ? "Inaktiv" : roleName(user.role)));
+      const role = document.createElement("select");
+      role.setAttribute("aria-label", `Roll för ${user.username}`);
+      ["reader", "editor", "admin"].forEach(value => { const option = el("option", "", roleName(value)); option.value = value; role.append(option); });
+      role.value = user.role;
+      role.disabled = isSelf;
+      const saveRole = action("Spara roll", "small-button", async () => {
+        saveRole.disabled = true;
+        try { await api(`/api/users/${user.id}`, "PUT", {role:role.value}); await loadUsers(); notify("Rollen har ändrats."); }
+        catch (error) { showError(error, $("#users-error")); }
+        finally { saveRole.disabled = isSelf; }
+      });
+      saveRole.disabled = isSelf;
+      row.append(role, saveRole);
       const password = document.createElement("input");
       password.type = "password"; password.minLength = 12; password.maxLength = 256;
       password.autocomplete = "new-password"; password.placeholder = "Nytt lösenord (minst 12 tecken)";
@@ -750,7 +779,10 @@ $("#users-button").addEventListener("click", () => {
   $("#user-form").reset(); $("#password-form").reset();
   $("#user-error").hidden = true; $("#password-error").hidden = true;
   $("#users-list").replaceChildren();
-  $("#users-dialog").showModal(); loadUsers();
+  $("#users-dialog").showModal();
+  $("#user-form").hidden = !isAdmin();
+  $("#users-list").hidden = !isAdmin();
+  if (isAdmin()) loadUsers();
 });
 $("#close-users").addEventListener("click", () => $("#users-dialog").close());
 $("#logout-button").addEventListener("click", async () => {
@@ -765,8 +797,8 @@ $("#user-form").addEventListener("submit", async event => {
   $("#create-user-button").disabled = true; $("#user-error").hidden = true;
   try {
     await api("/api/users", "POST", {username:userForm.elements.username.value.trim(),
-      password:userForm.elements.password.value});
-    userForm.reset(); await loadUsers(); notify("Administratören har skapats.");
+      password:userForm.elements.password.value, role:$("#new-user-role").value});
+    userForm.reset(); await loadUsers(); notify("Användaren har skapats.");
   } catch (error) { showError(error, $("#user-error")); }
   finally { $("#create-user-button").disabled = false; }
 });
@@ -825,9 +857,10 @@ async function boot() {
     const user = await api("/api/me");
     csrf = user.csrf;
     currentUser = user;
-    $("#account-name").textContent = `${user.username} · Admin`;
+    $("#account-name").textContent = `${user.username} · ${roleName(user.role)}`;
+    applyPermissions();
     await load();
+    openCapturedBookmark();
   } catch (error) { showError(error); }
 }
 window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });
-boot();

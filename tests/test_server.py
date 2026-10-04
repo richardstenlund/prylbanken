@@ -62,6 +62,8 @@ class ServerTests(unittest.TestCase):
             db.execute("DELETE FROM login_attempts")
             db.execute("DELETE FROM registration_attempts")
             db.execute("DELETE FROM users WHERE username != 'admin'")
+            for table in ("history", "activity", "projects", "saved_searches"):
+                db.execute(f"DELETE FROM {table}")
         status, body, headers = self.request("POST", "/api/login",
                                             {"username": "admin", "password": "integration-test-password"}, auth=False)
         self.assertEqual(status, 200, body)
@@ -243,7 +245,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/api/backups", extra={"X-CSRF-Token": ""})[0], 403)
 
     def test_backup_download_integrity_and_full_restore(self):
-        item_id = self.create(title="Backed up", filename="file.txt", filedata="aGVq")
+        project = self.request("POST", "/api/projects", {"name": "Backed up project"})[1]
+        self.request("POST", "/api/users", {"username": "backupreader", "password": "backup-reader-password", "role": "reader"})
+        self.request("POST", "/api/searches", {"name": "Backed up search", "filters": {"project": str(project["id"])}})
+        item_id = self.create(title="Backed up", filename="file.txt", filedata="aGVq", project_ids=[project["id"]])
         status, body, _ = self.request("POST", "/api/backups")
         self.assertIn(status, (200, 201), body)
         files = self.request("GET", "/api/backups")[1]["files"]
@@ -261,6 +266,7 @@ class ServerTests(unittest.TestCase):
         finally:
             destination.unlink()
         self.create(title="After backup")
+        self.request("DELETE", f'/api/projects/{project["id"]}')
         self.assertEqual(self.request("POST", f"/api/backups/{name}/restore", {"confirm": False})[0], 400)
         self.assertEqual(self.request("POST", f"/api/backups/{name}/restore", {"confirm": True})[0], 200)
         self.assertEqual(self.request("GET", "/api/me")[0], 401)
@@ -272,6 +278,11 @@ class ServerTests(unittest.TestCase):
         rows = self.request("GET", "/api/items")[1]
         self.assertEqual([item["title"] for item in rows], ["Backed up"])
         self.assertEqual(self.request("GET", f"/api/files/{item_id}")[1], b"hej")
+        self.assertEqual(rows[0]["project_ids"], [project["id"]])
+        self.assertEqual(self.request("GET", "/api/projects")[1][0]["name"], "Backed up project")
+        self.assertEqual(self.request("GET", "/api/searches")[1][0]["name"], "Backed up search")
+        users = self.request("GET", "/api/users")[1]
+        self.assertEqual(next(user for user in users if user["username"] == "backupreader")["role"], "reader")
 
     def test_corrupt_full_backup_does_not_replace_data(self):
         self.create(title="Survives failed restore")
@@ -288,7 +299,7 @@ class ServerTests(unittest.TestCase):
             path.unlink()
 
     def test_static_assets(self):
-        for path in ("/", "/login", "/login.js", "/app.js", "/style.css"):
+        for path in ("/", "/login", "/login.js", "/app.js", "/features.js", "/library-tools.js", "/style.css"):
             status, body, headers = self.request("GET", path)
             self.assertEqual(status, 200)
             self.assertTrue(body)
@@ -347,12 +358,12 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn("integration-test-password", stored)
         self.assertRegex(stored, r"^[a-f0-9]{32}:[a-f0-9]{64}$")
 
-    def test_public_registration_unique_names_and_admin_access(self):
-        payload = {"username": "PublicUser", "password": "public-user-password"}
+    def test_public_registration_unique_names_and_reader_access(self):
+        payload = {"username": "PublicUser", "password": "public-user-password", "role": "admin"}
         status, user, _ = self.request("POST", "/api/register", payload, auth=False)
         self.assertEqual(status, 201)
         self.assertEqual(user["username"], "publicuser")
-        self.assertEqual(user["role"], "admin")
+        self.assertEqual(user["role"], "reader")
         for username in ("PublicUser", "PUBLICUSER", "publicuser", "ADMIN"):
             self.assertEqual(self.request("POST", "/api/register",
                                           {**payload, "username": username}, auth=False)[0], 409)
@@ -360,13 +371,149 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         cookie = headers["Set-Cookie"].split(";", 1)[0]
         me = self.request("GET", "/api/me", extra={"Cookie": cookie})[1]
-        self.assertEqual(me["role"], "admin")
+        self.assertEqual(me["role"], "reader")
         extra = {"Cookie": cookie, "X-CSRF-Token": me["csrf"]}
         item_id = self.create(title="Shared data")
-        self.assertEqual(self.request("DELETE", f"/api/items/{item_id}", extra=extra)[0], 200)
+        self.assertEqual(self.request("GET", "/api/items", extra=extra)[0], 200)
+        self.assertEqual(self.request("DELETE", f"/api/items/{item_id}", extra=extra)[0], 403)
         self.assertEqual(self.request("POST", "/api/users",
                                       {"username": "createdbypublic", "password": "another-user-password"},
-                                      extra=extra)[0], 201)
+                                      extra=extra)[0], 403)
+
+    def role_session(self, username, role):
+        user = self.request("POST", "/api/users", {"username": username, "password": "test-role-password", "role": role})[1]
+        headers = self.request("POST", "/api/login", {"username": username, "password": "test-role-password"}, auth=False)[2]
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        me = self.request("GET", "/api/me", extra={"Cookie": cookie})[1]
+        return user, {"Cookie": cookie, "X-CSRF-Token": me["csrf"]}
+
+    def test_readers_blocked_from_all_shared_mutations_and_admin_data(self):
+        _, extra = self.role_session("reader", "reader")
+        item_id = self.create(filename="file.txt", filedata="aGVq")
+        history_id = self.request("GET", f"/api/items/{item_id}/history")[1][0]["id"]
+        for method, path, payload in (
+            ("POST", "/api/items", {"title": "Bad", "category": "kod"}),
+            ("PUT", f"/api/items/{item_id}", {"title": "Bad", "category": "kod"}),
+            ("DELETE", f"/api/items/{item_id}", None),
+            ("POST", f"/api/items/{item_id}/restore", {}),
+            ("POST", f"/api/items/{item_id}/history/{history_id}/restore", {}),
+            ("DELETE", f"/api/trash/{item_id}", None),
+            ("POST", "/api/projects", {"name": "No"}),
+            ("POST", "/api/categories", {"name": "No"}),
+            ("POST", "/api/examples", {"packs": ["docker"]}),
+            ("POST", "/api/restore", {"version": 1, "items": []}),
+            ("POST", "/api/batch/import", {"items": []}),
+            ("POST", "/api/backups", {}),
+        ):
+            self.assertEqual(self.request(method, path, payload, extra=extra)[0], 403, path)
+        for path in ("/api/users", "/api/settings", "/api/activity", "/api/backups"):
+            self.assertEqual(self.request("GET", path, extra=extra)[0], 403, path)
+        for path in ("/api/items", "/api/categories", "/api/projects", "/api/trash",
+                     "/api/backup", f"/api/files/{item_id}", f"/api/items/{item_id}/history"):
+            self.assertEqual(self.request("GET", path, extra=extra)[0], 200, path)
+        search = self.request("POST", "/api/searches", {"name": "My view", "filters": {"tags": "linux"}}, extra=extra)
+        self.assertEqual(search[0], 201)
+        self.assertEqual(self.request("GET", "/api/searches", extra=extra)[1][0]["name"], "My view")
+
+    def test_editor_can_change_library_but_not_administer_or_purge(self):
+        _, extra = self.role_session("editor", "editor")
+        status, item, _ = self.request("POST", "/api/items", {"title": "Editor", "category": "kod"}, extra=extra)
+        self.assertEqual(status, 201)
+        self.assertEqual(self.request("DELETE", f'/api/items/{item["id"]}', extra=extra)[0], 200)
+        self.assertEqual(self.request("DELETE", f'/api/trash/{item["id"]}', extra=extra)[0], 403)
+        self.assertEqual(self.request("POST", f'/api/items/{item["id"]}/restore', {}, extra=extra)[0], 200)
+        self.assertEqual(self.request("POST", "/api/projects", {"name": "Editor project"}, extra=extra)[0], 201)
+        for path in ("/api/users", "/api/settings", "/api/backups"):
+            self.assertEqual(self.request("GET", path, extra=extra)[0], 403)
+        self.assertEqual(self.request("PUT", "/api/users/1", {"role": "admin"}, extra=extra)[0], 403)
+
+    def test_role_changes_revoke_sessions_and_protect_own_admin(self):
+        user, extra = self.role_session("changer", "admin")
+        self.assertEqual(self.request("PUT", f'/api/users/{user["id"]}', {"role": "reader"})[0], 200)
+        self.assertEqual(self.request("GET", "/api/me", extra=extra)[0], 401)
+        admin_id = self.request("GET", "/api/me")[1]["id"]
+        self.assertEqual(self.request("PUT", f"/api/users/{admin_id}", {"role": "editor"})[0], 400)
+        self.assertEqual(self.request("PUT", f'/api/users/{user["id"]}', {"role": "bad"})[0], 400)
+
+    def test_projects_memberships_history_delete_and_json_roundtrip(self):
+        project = self.request("POST", "/api/projects", {"name": "Home server", "description": "Shared project"})[1]
+        item_id = self.create(project_ids=[project["id"]])
+        self.assertEqual(self.request("GET", "/api/items")[1][0]["project_ids"], [project["id"]])
+        self.request("PUT", f"/api/items/{item_id}", {"title": "Changed", "category": "kod", "content": "new"})
+        self.assertEqual(self.request("GET", "/api/items")[1][0]["project_ids"], [project["id"]])
+        export = self.request("GET", "/api/backup")[1]
+        self.assertEqual(export["projects"][0]["name"], "Home server")
+        self.assertEqual(self.request("POST", "/api/restore", export)[0], 201)
+        rows = self.request("GET", "/api/items")[1]
+        imported = next(item for item in rows if item["id"] != item_id)
+        self.assertNotEqual(imported["project_ids"], [project["id"]])
+        self.assertEqual(len(self.request("GET", "/api/projects")[1]), 2)
+        history = self.request("GET", f"/api/items/{item_id}/history")[1]
+        self.assertEqual(self.request("DELETE", f'/api/projects/{project["id"]}')[0], 200)
+        self.assertTrue(any(item["id"] == item_id for item in self.request("GET", "/api/items")[1]))
+        self.assertEqual(self.request("POST", f'/api/items/{item_id}/history/{history[-1]["id"]}/restore')[0], 200)
+        restored = next(item for item in self.request("GET", "/api/items")[1] if item["id"] == item_id)
+        self.assertEqual(restored["project_ids"], [])
+        self.assertEqual(self.request("POST", "/api/items",
+                                      {"title": "Bad", "category": "kod", "project_ids": [project["id"]]})[0], 400)
+
+    def test_saved_searches_are_private_and_persist(self):
+        _, extra = self.role_session("searchreader", "reader")
+        filters = {"query": "docker linux", "tags": "docker,linux", "descendants": True, "attachments": True,
+                   "category": "linux", "project": "", "sort": "title", "os": "Ubuntu"}
+        saved = self.request("POST", "/api/searches", {"name": "My Linux", "filters": filters}, extra=extra)[1]
+        self.assertEqual(self.request("GET", "/api/searches")[1], [])
+        self.assertEqual(self.request("DELETE", f'/api/searches/{saved["id"]}')[0], 404)
+        self.process.terminate(); self.process.wait(timeout=5); type(self).start()
+        rows = self.request("GET", "/api/searches", extra=extra)[1]
+        self.assertEqual(rows[0]["filters"]["tags"], "docker,linux")
+        self.assertTrue(rows[0]["filters"]["descendants"])
+        self.assertEqual(self.request("DELETE", f'/api/searches/{saved["id"]}', extra=extra)[0], 200)
+        for bad in ({"attachments": "yes"}, {"project": []}, {"sort": "invalid"}, None):
+            self.assertEqual(self.request("POST", "/api/searches", {"name": "Bad", "filters": bad}, extra=extra)[0], 400)
+
+    def test_batch_preview_duplicates_atomicity_and_recheck(self):
+        candidate = {"title": "script.sh", "category": "linux", "content": "  echo hello\n", "language": "bash"}
+        duplicate = {**candidate, "title": "renamed.sh"}
+        payload = {"items": [candidate, duplicate]}
+        preview = self.request("POST", "/api/batch/preview", payload)
+        self.assertEqual(preview[0], 200)
+        self.assertEqual(preview[1]["items"][1]["duplicate"], {"index": 0})
+        self.assertEqual(self.request("GET", "/api/items")[1], [])
+        self.assertEqual(self.request("POST", "/api/batch/import", payload)[1], {"added": 1, "skipped": 1})
+        preview = self.request("POST", "/api/batch/preview", {"items": [candidate]})[1]
+        self.assertIn("id", preview["items"][0]["duplicate"])
+        self.assertEqual(self.request("POST", "/api/batch/import", {"items": [candidate]})[1], {"added": 0, "skipped": 1})
+        self.assertEqual(self.request("POST", "/api/batch/import",
+                                      {"items": [candidate], "allow_duplicates": True})[1]["added"], 1)
+        before = len(self.request("GET", "/api/items")[1])
+        self.assertEqual(self.request("POST", "/api/batch/import",
+                                      {"items": [{**candidate, "content": "different"}, {**candidate, "title": ""}]})[0], 400)
+        self.assertEqual(len(self.request("GET", "/api/items")[1]), before)
+        for invalid in ({"items": []}, {"items": [candidate] * 51}, {"items": [candidate], "allow_duplicates": "yes"},
+                        {"items": [{**candidate, "favorite": "bad"}]}):
+            self.assertEqual(self.request("POST", "/api/batch/preview", invalid)[0], 400)
+
+    def test_batch_binary_and_utf8_byte_threshold(self):
+        file = {"title": "archive.zip", "category": "filer", "filename": "archive.zip", "filedata": "AAEC"}
+        result = self.request("POST", "/api/batch/import", {"items": [file]})
+        self.assertEqual(result[0], 201)
+        row = self.request("GET", "/api/items")[1][0]
+        self.assertEqual(self.request("GET", f'/api/files/{row["id"]}')[1], b"\x00\x01\x02")
+        for text, expected in (("å" * 100000, 200), ("å" * 100001, 400)):
+            self.assertEqual(self.request("POST", "/api/batch/preview",
+                                          {"items": [{"title": "test.txt", "category": "kod", "content": text}]})[0], expected)
+        empty = {"title": "empty.txt", "category": "kod", "content": "", "download_name": "empty.txt"}
+        result = self.request("POST", "/api/batch/import", {"items": [empty, {**empty, "title": "empty2.txt"}]})
+        self.assertEqual(result[1], {"added": 1, "skipped": 1})
+        self.assertIsNotNone(self.request("POST", "/api/batch/preview", {"items": [empty]})[1]["items"][0]["duplicate"])
+
+    def test_batch_total_attachment_limit_exact_threshold(self):
+        encoded = base64.b64encode(b"x" * (20 * 1024 * 1024)).decode()
+        candidate = {"title": "limit.bin", "category": "filer", "filename": "limit.bin", "filedata": encoded}
+        self.assertEqual(self.request("POST", "/api/batch/preview", {"items": [candidate]})[0], 200)
+        extra = {"title": "extra.bin", "category": "filer", "filename": "extra.bin", "filedata": "eA=="}
+        self.assertEqual(self.request("POST", "/api/batch/preview", {"items": [candidate, extra]})[0], 400)
 
     def test_registration_validation_origin_and_rate_limit(self):
         for payload in ([], {}, {"username": "ab", "password": "long-test-password"},
@@ -698,6 +845,19 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(rows[0]["language"], "plain")
         categories = self.request("GET", "/api/categories", extra={"Cookie": cookie})[1]
         self.assertTrue(any(category["key"] == "custom-legacy" for category in categories))
+
+    def test_upgrade_preserves_existing_admin_accounts(self):
+        self.request("POST", "/api/users", {"username": "legacyadmin", "password": "legacy-admin-password"})
+        self.process.terminate()
+        self.process.wait(timeout=5)
+        with closing(sqlite3.connect(Path(self.directory.name) / "library.sqlite")) as db, db:
+            db.execute("ALTER TABLE users DROP COLUMN role")
+        type(self).start()
+        users = self.request("GET", "/api/users")[1]
+        self.assertEqual({user["username"] for user in users}, {"admin", "legacyadmin"})
+        self.assertTrue(all(user["role"] == "admin" for user in users))
+        self.assertEqual(self.request("POST", "/api/login",
+                                      {"username": "legacyadmin", "password": "legacy-admin-password"}, auth=False)[0], 200)
 
 
 if __name__ == "__main__":

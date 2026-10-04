@@ -1,15 +1,18 @@
 """Schema migrations, revision storage and coordinated SQLite backups."""
 import base64
 import datetime as dt
+import hashlib
 import json
 import logging
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import threading
 from contextlib import closing
 from pathlib import Path
+from library import fingerprint
 
 DB_LOCK = threading.RLock()
 LANGUAGES = {"plain", "bash", "powershell", "bat", "yaml", "json", "python", "javascript", "sql"}
@@ -26,7 +29,7 @@ BUILTINS = {
     "sakerhet": "IT-säkerhet", "dokumentation": "Guider & anteckningar", "filer": "Filer",
 }
 ITEM_FIELDS = ("title", "category", "content", "notes", "tags", "favorite", "filename",
-               "filedata", "example_key", *METADATA)
+               "filedata", "example_key", "project_ids", *METADATA)
 
 
 def audit(db, actor, action, target):
@@ -37,6 +40,7 @@ def audit(db, actor, action, target):
 def snapshot(db, item_id, actor):
     row = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
     data = {field: row[field] for field in ITEM_FIELDS}
+    data["project_ids"] = json.loads(data["project_ids"])
     if data["filedata"] is not None:
         data["filedata"] = base64.b64encode(data["filedata"]).decode("ascii")
     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True)
@@ -56,6 +60,22 @@ def migrate(db):
         db.execute("ALTER TABLE items ADD COLUMN deleted_at TEXT")
     if "active" not in {r["name"] for r in db.execute("PRAGMA table_info(users)")}:
         db.execute("ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+    if "role" not in {r["name"] for r in db.execute("PRAGMA table_info(users)")}:
+        db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
+    if "project_ids" not in columns:
+        db.execute("ALTER TABLE items ADD COLUMN project_ids TEXT NOT NULL DEFAULT '[]'")
+    if "fingerprint" not in columns:
+        db.execute("ALTER TABLE items ADD COLUMN fingerprint TEXT")
+        for row in db.execute("SELECT id,content,filedata,download_name FROM items").fetchall():
+            db.execute("UPDATE items SET fingerprint=? WHERE id=?",
+                       (fingerprint(row["content"], row["filedata"], bool(row["download_name"])), row["id"]))
+    db.execute("CREATE INDEX IF NOT EXISTS items_fingerprint ON items(fingerprint)")
+    db.execute("""CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '')""")
+    db.execute("""CREATE TABLE IF NOT EXISTS saved_searches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,filters TEXT NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS categories (
         key TEXT PRIMARY KEY,name TEXT NOT NULL,parent TEXT)""")
     db.execute("""CREATE TABLE IF NOT EXISTS history (
@@ -145,6 +165,9 @@ class Backups:
         self.directory = Path(os.environ.get("BACKUP_DIR", str(data / "backups")))
         self.enabled = os.environ.get("BACKUPS_ENABLED", "true").lower() == "true"
         self.last_error = None
+        self.external_directory = Path(os.environ["EXTERNAL_BACKUP_DIR"]) if os.environ.get("EXTERNAL_BACKUP_DIR") else None
+        self.external_error = None
+        self.external_last_success = None
         self.stop = threading.Event()
 
     def files(self):
@@ -171,7 +194,59 @@ class Backups:
         return path
 
     def status(self):
-        return {"files": self.files(), "last_error": self.last_error, "enabled": self.enabled}
+        return {"files": self.files(), "last_error": self.last_error, "enabled": self.enabled,
+                "external": {"enabled": self.external_directory is not None,
+                             "directory": str(self.external_directory) if self.external_directory else "",
+                             "last_error": self.external_error, "last_success": self.external_last_success}}
+
+    @staticmethod
+    def checksum(path):
+        with path.open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").digest()
+
+    def sync_external(self):
+        if self.external_directory is None:
+            return
+        pending = None
+        try:
+            directory = self.external_directory
+            if directory.resolve() == self.directory.resolve():
+                raise ValueError("Extern backup måste använda en annan katalog än de lokala kopiorna.")
+            if not directory.is_dir() or not (directory / ".prylbanken-backup-target").is_file():
+                raise OSError("NAS-målet saknas eller markörfilen .prylbanken-backup-target saknas. Kontrollera monteringen.")
+            with DB_LOCK:
+                for entry in self.files():
+                    source = self.path(entry["name"])
+                    target = directory / entry["name"]
+                    if target.is_symlink():
+                        raise OSError("En extern säkerhetskopia får inte vara en symbolisk länk.")
+                    digest = self.checksum(source)
+                    if target.is_file() and self.checksum(target) == digest:
+                        continue
+                    pending = directory / (entry["name"] + "." + secrets.token_hex(8) + ".pending")
+                    with pending.open("xb") as destination, source.open("rb") as original:
+                        shutil.copyfileobj(original, destination)
+                        destination.flush()
+                        os.fsync(destination.fileno())
+                    pending.chmod(0o600)
+                    if self.checksum(pending) != digest:
+                        raise OSError("Den externa kopian klarade inte kontrollsumman.")
+                    pending.replace(target)
+                    pending = None
+                for prefix in ("daily-", "manual-", "safety-"):
+                    files = sorted((p for p in directory.glob(prefix + "*.sqlite")
+                                    if self.valid_name(p.name) and p.is_file() and not p.is_symlink()), reverse=True)
+                    for expired in files[14:]:
+                        expired.unlink()
+            self.external_error = None
+            self.external_last_success = dt.datetime.now(dt.timezone.utc).isoformat()
+        except (OSError, ValueError) as error:
+            self.external_error = str(error)
+            logging.exception("External NAS backup failed")
+            raise
+        finally:
+            if pending is not None and pending.exists():
+                pending.unlink()
 
     def create(self, kind="manual", protect=None):
         if not self.enabled:
@@ -191,6 +266,7 @@ class Backups:
                     finally:
                         destination.close()
                 pending.replace(target)
+                target.chmod(0o600)
                 # Daily, manual and pre-restore safety backups each have a bounded retention.
                 for prefix in ("daily-", "manual-", "safety-"):
                     old = sorted((p for p in self.directory.glob(prefix + "*.sqlite")
@@ -202,6 +278,7 @@ class Backups:
                     for path in old:
                         if path not in kept:
                             path.unlink()
+                self.sync_external()
                 self.last_error = None
                 return next(entry for entry in self.files() if entry["name"] == name)
             except (OSError, sqlite3.Error) as error:
@@ -229,7 +306,13 @@ class Backups:
                 }.items():
                     if not required <= {r["name"] for r in source.execute(f"PRAGMA table_info({table})")}:
                         raise ValueError("Filen är inte en giltig Prylbanken-databas.")
-                active = "WHERE active=1" if "active" in {r["name"] for r in source.execute("PRAGMA table_info(users)")} else ""
+                user_columns = {r["name"] for r in source.execute("PRAGMA table_info(users)")}
+                conditions = []
+                if "active" in user_columns:
+                    conditions.append("active=1")
+                if "role" in user_columns:
+                    conditions.append("role='admin'")
+                active = "WHERE " + " AND ".join(conditions) if conditions else ""
                 if not source.execute("SELECT 1 FROM users " + active + " LIMIT 1").fetchone():
                     raise ValueError("Säkerhetskopian saknar ett aktivt administratörskonto.")
                 safety = self.create("safety", protect=name)
@@ -268,6 +351,8 @@ class Backups:
                         name = "daily-" + dt.datetime.now(dt.timezone.utc).date().isoformat() + ".sqlite"
                         if not (self.directory / name).is_file():
                             self.create("daily")
+                        else:
+                            self.sync_external()
             except (OSError, sqlite3.Error, ValueError) as error:
                 self.last_error = str(error)
                 logging.exception("Daily SQLite backup failed; retrying in one hour")
