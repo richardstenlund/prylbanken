@@ -6,6 +6,38 @@ taggar, favoriter, redigering och säkerhetskopiering ingår.
 
 ## Starta med Docker
 
+### Enkel installation på en Linux Docker-host
+
+Docker Engine, Docker Compose v2 (med stöd för `--wait`) och Git måste finnas.
+Kör detta på servern:
+
+```sh
+git clone https://github.com/richardstenlund/prylbanken.git && cd prylbanken && sh install.sh
+```
+
+Skriptet skapar ett slumpmässigt lösenord, öppnar port 8080 för LAN-åtkomst,
+bygger containern och väntar på godkänd hälsokontroll. Därefter visas
+användarnamnet `admin` och lösenordet i terminalen. Öppna
+`http://SERVERNS-IP:8080` från en annan enhet på samma betrodda nätverk.
+Visa serverns IP med `hostname -I`.
+
+Lösenord och inställningar sparas i `.env` med begränsade filrättigheter.
+**Dela inte terminalutskriften eller `.env`.** HTTP är inte krypterat och
+LAN-installationen binder till alla nätverksgränssnitt; exponera inte porten
+mot internet. Skriptet installerar inte Docker och ändrar inte brandväggen.
+
+Om du redan har hämtat projektet: kör `git pull --ff-only` och `sh install.sh`
+i projektmappen. En befintlig `.env`, lösenordet och biblioteket bevaras.
+Skriptet använder `.env`, inte exporterade `APP_PASSWORD`, `BIND_ADDRESS` eller
+`APP_PORT` från din terminal.
+
+Om port 8080 är upptagen: ändra `APP_PORT=8081` i `.env`, kör `sh install.sh`
+igen och öppna port 8081. Vid misslyckad installation visas ett fel, inte ett
+framgångsmeddelande. Läs `docker compose logs --tail=50`. Det skapade lösenordet
+finns kvar i `.env` även om bygget misslyckas.
+
+### Manuell installation (endast localhost som standard)
+
 1. Installera Docker med Docker Compose.
 2. Kopiera `.env.example` till `.env`. Ange ett unikt lösenord på minst 12 tecken
    i `APP_PASSWORD`. Använd inte kolon. För lösenord med `$`, omslut värdet med
@@ -28,7 +60,7 @@ inte en fleranvändartjänst med separata rättigheter.
 
 Som säkert standardval exponeras porten bara på Docker-värdens localhost.
 För andra enheter: använd en HTTPS-reverseproxy som kan nå port 8080.
-Vid direkt LAN-test kan portmappningen ändras till `"8080:8080"`. Öppna då
+Vid direkt LAN-test kan `BIND_ADDRESS=0.0.0.0` anges i `.env`. Öppna då
 `http://SERVERNS-IP:8080`, men endast på ett betrott privat nätverk.
 HTTP Basic-inloggning skickar inte lösenordet krypterat utan HTTPS.
 Exponera därför **inte** HTTP-porten direkt mot internet. Kopiering till urklipp
