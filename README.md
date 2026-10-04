@@ -62,12 +62,18 @@ administratörsbehörighet. Det finns inga privata samlingar eller separata rät
   från Basic-inloggningen används samma lösenord. Befintligt innehåll behålls.
 - Logga in via den nya inloggningssidan. Webbläsarens gamla Basic-inloggning
   används inte längre.
-- Klicka på **Användare** för att se konton och skapa en ny administratör.
-  Bara inloggade administratörer kan skapa konton. Självregistrering är inte tillåten.
+- Alla som når inloggningssidan kan välja **Skapa konto** och registrera sig
+  utan inloggning eller inbjudan. Varje konto får ett unikt användarnamn och eget
+  lösenord. Stora och små bokstäver räknas som samma namn; upptagna namn nekas.
+  Efter registreringen loggar användaren in med sitt nya lösenord.
+- Klicka på **Användare** för att se konton eller skapa en administratör åt någon annan.
 - Användarnamn innehåller 3–40 tecken (a–z, siffror, punkt, bindestreck eller
   understreck) och sparas med små bokstäver. Lösenord kräver 12–256 tecken.
 - Alla användare kan läsa, redigera och radera hela biblioteket, exportera filer
-  och skapa fler administratörer. Skapa därför bara konton åt personer du litar på.
+  och skapa fler administratörer. **Öppen registrering ger alla som kan nå sidan
+  full administratörsåtkomst till biblioteket.** Begränsa nätverksåtkomsten med
+  exempelvis ett betrott LAN eller VPN. HTTPS skyddar trafiken men begränsar
+  inte vem som får skapa ett konto.
 - Under **Användare → Byt ditt lösenord** kan användaren ändra sitt eget lösenord.
   Alla användarens sessioner återkallas och ny inloggning krävs.
 - **Logga ut** återkallar den aktuella sessionen. Sessioner gäller i 12 timmar
@@ -76,6 +82,8 @@ administratörsbehörighet. Det finns inga privata samlingar eller separata rät
   inte i klartext. Sessionscookies är HttpOnly och SameSite=Strict. Skrivningar
   skyddas av en sessionstoken för CSRF. Inloggningsförsök begränsas till 10 per
   fem minuter och anslutande IP; bakom en reverseproxy kan gränsen delas av alla.
+  Registreringen tillåter högst fem giltigt formaterade försök per fem minuter
+  och anslutande IP, inklusive försök med redan upptagna namn.
 - `APP_PASSWORD` används **bara för att skapa första kontot**. Att ändra `.env`
   återställer inte ett befintligt lösenord. Behåll tillgången till minst ett konto;
   lösenordsåterställning via e-post och radering av konton ingår inte.

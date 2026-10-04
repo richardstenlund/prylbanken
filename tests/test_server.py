@@ -57,6 +57,7 @@ class ServerTests(unittest.TestCase):
             db.execute("DELETE FROM items")
             db.execute("DELETE FROM sessions")
             db.execute("DELETE FROM login_attempts")
+            db.execute("DELETE FROM registration_attempts")
             db.execute("DELETE FROM users WHERE username != 'admin'")
         status, body, headers = self.request("POST", "/api/login",
                                             {"username": "admin", "password": "integration-test-password"}, auth=False)
@@ -144,7 +145,7 @@ class ServerTests(unittest.TestCase):
                               extra={"Cookie": cookie, "X-CSRF-Token": me["csrf"]})[0]
         self.assertEqual(status, 201)
 
-    def test_user_validation_and_registration_is_private(self):
+    def test_user_validation_and_admin_user_creation_requires_login(self):
         payload = {"username": "newuser", "password": "new-user-test-password"}
         self.assertEqual(self.request("POST", "/api/users", payload, auth=False)[0], 401)
         for username, password in (("ab", "long-enough-password"), ("bad user", "long-enough-password"),
@@ -157,6 +158,48 @@ class ServerTests(unittest.TestCase):
             stored = db.execute("SELECT password_hash FROM users WHERE username='admin'").fetchone()[0]
         self.assertNotIn("integration-test-password", stored)
         self.assertRegex(stored, r"^[a-f0-9]{32}:[a-f0-9]{64}$")
+
+    def test_public_registration_unique_names_and_admin_access(self):
+        payload = {"username": "PublicUser", "password": "public-user-password"}
+        status, user, _ = self.request("POST", "/api/register", payload, auth=False)
+        self.assertEqual(status, 201)
+        self.assertEqual(user["username"], "publicuser")
+        self.assertEqual(user["role"], "admin")
+        for username in ("PublicUser", "PUBLICUSER", "publicuser", "ADMIN"):
+            self.assertEqual(self.request("POST", "/api/register",
+                                          {**payload, "username": username}, auth=False)[0], 409)
+        status, _, headers = self.request("POST", "/api/login", payload, auth=False)
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        me = self.request("GET", "/api/me", extra={"Cookie": cookie})[1]
+        self.assertEqual(me["role"], "admin")
+        extra = {"Cookie": cookie, "X-CSRF-Token": me["csrf"]}
+        item_id = self.create(title="Shared data")
+        self.assertEqual(self.request("DELETE", f"/api/items/{item_id}", extra=extra)[0], 200)
+        self.assertEqual(self.request("POST", "/api/users",
+                                      {"username": "createdbypublic", "password": "another-user-password"},
+                                      extra=extra)[0], 201)
+
+    def test_registration_validation_origin_and_rate_limit(self):
+        for payload in ([], {}, {"username": "ab", "password": "long-test-password"},
+                        {"username": "newuser", "password": "short"},
+                        {"username": "bad name", "password": "long-test-password"},
+                        {"username": "newuser", "password": "x" * 257}):
+            self.assertEqual(self.request("POST", "/api/register", payload, auth=False)[0], 400)
+        payload = {"username": "newuser", "password": "long-test-password"}
+        self.assertEqual(self.request("POST", "/api/register", payload, auth=False,
+                                      extra={"Origin": "https://untrusted.invalid"})[0], 403)
+        self.assertEqual(self.request("POST", "/api/register", payload, auth=False,
+                                      extra={"Sec-Fetch-Site": "cross-site"})[0], 403)
+        for index in range(5):
+            self.assertEqual(self.request("POST", "/api/register",
+                                          {**payload, "username": f"user{index}"}, auth=False)[0], 201)
+        status, _, headers = self.request("POST", "/api/register", payload, auth=False)
+        self.assertEqual(status, 429)
+        self.assertEqual(headers["Retry-After"], "300")
+        with closing(sqlite3.connect(Path(self.directory.name) / "library.sqlite")) as db, db:
+            db.execute("UPDATE registration_attempts SET started=0")
+        self.assertEqual(self.request("POST", "/api/register", payload, auth=False)[0], 201)
 
     def test_csrf_required_for_mutations(self):
         for token in ("", "wrong"):

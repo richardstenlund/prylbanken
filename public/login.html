@@ -35,13 +35,22 @@ echo "Välkommen till Prylbanken"</pre>
         <p class="eyebrow">VÄLKOMMEN TILLBAKA</p>
         <h2>Logga in i ditt bibliotek.</h2>
         <p class="muted">En plats för allt som är bra att ha.</p>
+        <div class="auth-switch" role="group" aria-label="Välj inloggning eller registrering"><button type="button" id="login-tab" aria-pressed="true">Logga in</button><button type="button" id="register-tab" aria-pressed="false">Skapa konto</button></div>
+        <p id="register-success" class="auth-success" role="status" hidden></p>
         <form id="login-form">
           <label>Användarnamn<input name="username" required minlength="3" maxlength="40" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Ditt användarnamn" autofocus></label>
           <label>Lösenord<div class="password-field"><input name="password" id="login-password" type="password" required maxlength="256" autocomplete="current-password" placeholder="Ditt lösenord"><button type="button" id="show-password" aria-pressed="false">Visa</button></div></label>
           <p id="login-error" class="error" role="alert" hidden></p>
           <button type="submit" class="primary" id="login-button">Logga in →</button>
         </form>
-        <div class="login-help"><span>◇</span><p>Saknar du ett konto? Be en administratör skapa ett åt dig. Alla användare är administratörer och delar samma bibliotek.</p></div>
+        <form id="register-form" hidden>
+          <label>Välj användarnamn<input name="username" required minlength="3" maxlength="40" pattern="[a-zA-Z0-9_.\-]{3,40}" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Ett unikt användarnamn"><small class="muted">3–40 tecken: a–z, siffror, punkt, bindestreck eller understreck. Stora och små bokstäver räknas som samma namn.</small></label>
+          <label>Välj lösenord<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password" placeholder="Minst 12 tecken"></label>
+          <label>Bekräfta lösenord<input name="confirm_password" type="password" required minlength="12" maxlength="256" autocomplete="new-password" placeholder="Skriv lösenordet igen"></label>
+          <p id="register-error" class="error" role="alert" hidden></p>
+          <button type="submit" class="primary" id="register-button">Skapa mitt konto →</button>
+        </form>
+        <div class="login-help"><span>◇</span><p>Alla kan skapa ett eget konto med unikt användarnamn. Alla blir administratörer och kan läsa, ändra och radera allt i det gemensamma biblioteket.</p></div>
       </div>
       <p class="login-panel-footer">PRYLBANKEN <span>•</span> DITT DIGITALA FÖRRÅD</p>
     </section>

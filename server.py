@@ -245,6 +245,25 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST" and path == "/api/login":
                 self.login()
                 return
+            if method == "POST" and path == "/api/register":
+                username, password = credentials(self.read_json(8192))
+                valid_password(password)
+                now = int(time.time())
+                with connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    db.execute("DELETE FROM registration_attempts WHERE started<=?", (now - 300,))
+                    address = self.client_address[0]
+                    attempt = db.execute("SELECT attempts FROM registration_attempts WHERE address=?", (address,)).fetchone()
+                    if attempt and attempt["attempts"] >= 5:
+                        db.commit()
+                        self.reply(429, {"error": "För många registreringsförsök. Vänta fem minuter."},
+                                   headers={"Retry-After": "300"})
+                        return
+                    db.execute("INSERT INTO registration_attempts(address,started,attempts) VALUES (?,?,1) "
+                               "ON CONFLICT(address) DO UPDATE SET attempts=attempts+1", (address, now))
+                    db.commit()
+                    self.create_user(db, username, password)
+                return
             if not self.authenticated():
                 return
             if not hmac.compare_digest(self.headers.get("X-CSRF-Token", "").encode(), self.user["csrf"].encode()):
@@ -282,14 +301,7 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "POST" and path == "/api/users":
                     username, password = credentials(self.read_json(8192))
                     valid_password(password)
-                    try:
-                        cursor = db.execute("INSERT INTO users(username,password_hash) VALUES (?,?)",
-                                            (username, password_hash(password)))
-                    except sqlite3.IntegrityError:
-                        self.reply(409, {"error": "Användarnamnet finns redan."})
-                        return
-                    db.commit()
-                    self.reply(201, {"id": cursor.lastrowid, "username": username, "role": "admin"})
+                    self.create_user(db, username, password)
                     return
                 if method == "PUT" and path == "/api/password":
                     payload = self.read_json(8192)
@@ -346,6 +358,18 @@ class Handler(BaseHTTPRequestHandler):
             import traceback
             self.log_error("Databasfel: %s", traceback.format_exc())
             self.reply(500, {"error": "Databasen kunde inte uppdateras. Kontrollera serverloggen och diskutrymmet."})
+
+    def create_user(self, db, username, password):
+        try:
+            cursor = db.execute("INSERT INTO users(username,password_hash) VALUES (?,?)",
+                                (username, password_hash(password)))
+        except sqlite3.IntegrityError as error:
+            if error.sqlite_errorname != "SQLITE_CONSTRAINT_UNIQUE":
+                raise
+            self.reply(409, {"error": "Användarnamnet finns redan. Välj ett annat."})
+            return
+        db.commit()
+        self.reply(201, {"id": cursor.lastrowid, "username": username, "role": "admin"})
 
     def login(self):
         username, password = credentials(self.read_json(8192))
@@ -428,6 +452,8 @@ if __name__ == "__main__":
             token_hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL,
             csrf TEXT NOT NULL,expires INTEGER NOT NULL)""")
         db.execute("""CREATE TABLE IF NOT EXISTS login_attempts (
+            address TEXT PRIMARY KEY,started INTEGER NOT NULL,attempts INTEGER NOT NULL)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS registration_attempts (
             address TEXT PRIMARY KEY,started INTEGER NOT NULL,attempts INTEGER NOT NULL)""")
         if "example_key" not in {row["name"] for row in db.execute("PRAGMA table_info(items)")}:
             db.execute("ALTER TABLE items ADD COLUMN example_key TEXT")
