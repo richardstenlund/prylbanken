@@ -261,9 +261,22 @@ för privat åtkomst.
 - Filkategorin visar alla poster med bifogade filer.
 - Stjärnan markerar favoriter. Standardordningen visar favoriter först, därefter
   senast uppdaterade poster. `/` fokuserar sökfältet.
-- **Startbibliotek** låter dig välja bland nio paket med totalt **160 mallar**:
+- **Startbibliotek** låter dig välja bland tio paket med totalt **190 mallar och länkar**:
   spelservrar/SteamCMD, Docker, Linux/backup, Windows/PowerShell, nätverk/SSH och
   Git/Python/SQL samt containerstarter, serverprogram och skript/automation.
+  Proxmox-paketet innehåller **26 kommandon/egna skriptmallar och fyra källänkar**:
+  VM/LXC-status, start/skonsam avstängning, konfiguration, snapshots, full klon,
+  backup/återställning till nytt ID, lagring, klusterinventering och OS-mallar.
+  Två egna Bash-skript ger en läsande inventeringsrapport och en backup med
+  argumentkontroll/interaktiv bekräftelse. Kommandon använder mallvariabler.
+  Syntax är kontrollerad mot officiella manpages; inget är körtestat på en Proxmox-host.
+  Paketet hittas via **Startbibliotek → Proxmox VE & hjälpskript** och är frivilligt.
+  Redigerare/administratörer kan importera det; läsare kan använda sparat innehåll.
+  Uppgradering skapar kategorin men importerar inte automatiskt mallarna.
+  Community-länkar leder till ett oberoende community-projekt, inte en officiell
+  Proxmox-tjänst. Granska skript och deras hjälpfiler innan du kör något med root.
+  Inga tredjepartsskript hämtas eller körs av webbplatsen. Snapshots ersätter inte
+  extern backup; start/avstängning och lagringsändringar kan påverka drift.
   Samma knapp finns i den tomma samlingen.
 - Containerpaketet innehåller 12 Compose-mallar: Nginx, Apache, Caddy,
   PostgreSQL, MariaDB, Redis, RabbitMQ, Gitea, Vaultwarden, Uptime Kuma,

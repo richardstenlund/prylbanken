@@ -669,19 +669,19 @@ class ServerTests(unittest.TestCase):
 
     def test_catalog_output_and_import_all(self):
         catalog = self.request("GET", "/api/examples")[1]
-        self.assertEqual(len(catalog["packs"]), 9)
-        self.assertEqual(len(catalog["items"]), 160)
-        self.assertEqual(len({item["key"] for item in catalog["items"]}), 160)
-        self.assertEqual(sum(pack["count"] for pack in catalog["packs"]), 160)
+        self.assertEqual(len(catalog["packs"]), 10)
+        self.assertEqual(len(catalog["items"]), 190)
+        self.assertEqual(len({item["key"] for item in catalog["items"]}), 190)
+        self.assertEqual(sum(pack["count"] for pack in catalog["packs"]), 190)
         for item in catalog["items"]:
             self.assertTrue(item["content"])
             self.assertIn("Referens: https://", item["notes"])
         packs = [pack["id"] for pack in catalog["packs"]]
         status, result, _ = self.request("POST", "/api/examples", {"packs": packs})
         self.assertEqual(status, 201)
-        self.assertEqual(result, {"added": 160, "skipped": 0})
+        self.assertEqual(result, {"added": 190, "skipped": 0})
         rows = self.request("GET", "/api/items")[1]
-        self.assertEqual(len(rows), 160)
+        self.assertEqual(len(rows), 190)
         self.assertTrue(any("Valheim" in row["title"] for row in rows))
         self.assertTrue(any("Counter-Strike 2" in row["title"] for row in rows))
 
@@ -739,10 +739,51 @@ class ServerTests(unittest.TestCase):
         self.request("PUT", f'/api/items/{row["id"]}', {**row, "content": "MY EDITED ORIGINAL"})
         packs = [pack["id"] for pack in catalog["packs"]]
         result = self.request("POST", "/api/examples", {"packs": packs})[1]
-        self.assertEqual(result, {"added": 100, "skipped": 60})
+        self.assertEqual(result, {"added": 130, "skipped": 60})
         rows = self.request("GET", "/api/items")[1]
-        self.assertEqual(len(rows), 160)
+        self.assertEqual(len(rows), 190)
         self.assertTrue(any(item["content"] == "MY EDITED ORIGINAL" for item in rows))
+
+    def test_proxmox_pack_sources_metadata_import_and_edit_preservation(self):
+        catalog = self.request("GET", "/api/examples")[1]
+        pack = next(pack for pack in catalog["packs"] if pack["id"] == "proxmox")
+        self.assertEqual(pack["count"], 30)
+        templates = [item for item in catalog["items"] if item["pack"] == "proxmox"]
+        commands = [item for item in templates if item["category"] == "proxmox"]
+        links = [item for item in templates if item["category"] == "lankar"]
+        self.assertEqual((len(commands), len(links)), (26, 4))
+        for item in commands:
+            self.assertEqual(item["language"], "bash")
+            self.assertEqual(item["status"], "template")
+            self.assertIn("inte körtestad", item["notes"])
+            self.assertIn("Referens: https://pve.proxmox.com/pve-docs/", item["notes"])
+            self.assertNotIn("--force", item["content"])
+            self.assertNotIn("curl", item["content"])
+            self.assertNotIn("wget", item["content"])
+        by_key = {item["key"]: item for item in templates}
+        self.assertTrue(by_key["proxmox-vm-restore"]["content"].startswith('qmrestore "{{backup_archive}}" "{{new_vmid}}"'))
+        self.assertTrue(by_key["proxmox-ct-restore"]["content"].startswith('pct restore "{{new_ctid}}" "{{backup_archive}}"'))
+        self.assertEqual(by_key["proxmox-report-script"]["download_name"], "pve-inventory.sh")
+        self.assertEqual(by_key["proxmox-backup-script"]["download_name"], "pve-backup.sh")
+        self.assertIn("https://github.com/community-scripts/ProxmoxVE", [item["content"] for item in links])
+        self.assertEqual(self.request("POST", "/api/examples", {"packs": ["proxmox"]})[1],
+                         {"added": 30, "skipped": 0})
+        rows = self.request("GET", "/api/items")[1]
+        edited = next(row for row in rows if row["title"] == by_key["proxmox-report-script"]["title"])
+        self.assertEqual(edited["content"], by_key["proxmox-report-script"]["content"])
+        self.assertEqual(edited["language"], "bash")
+        self.assertEqual(edited["download_name"], "pve-inventory.sh")
+        self.assertEqual(edited["status"], "template")
+        self.assertEqual(edited["tested_at"], "")
+        vm_restore = next(row for row in rows if row["title"] == by_key["proxmox-vm-restore"]["title"])
+        self.assertEqual(vm_restore["content"], by_key["proxmox-vm-restore"]["content"])
+        self.request("PUT", f'/api/items/{edited["id"]}', {**edited, "content": "# MY EDITED SCRIPT\n"})
+        self.assertEqual(self.request("POST", "/api/examples", {"packs": ["proxmox"]})[1],
+                         {"added": 0, "skipped": 30})
+        self.assertEqual(next(row["content"] for row in self.request("GET", "/api/items")[1]
+                              if row["id"] == edited["id"]), "# MY EDITED SCRIPT\n")
+        self.assertTrue(any(category["key"] == "proxmox" and category["name"] == "Proxmox VE"
+                            for category in self.request("GET", "/api/categories")[1]))
 
     def test_game_expansion_platforms_and_install_ids(self):
         catalog = self.request("GET", "/api/examples")[1]

@@ -27,6 +27,7 @@ BUILTINS = {
     "linux": "Linux", "windows": "Windows", "natverk": "Nätverk",
     "databaser": "Databaser & SQL", "utveckling": "Utveckling", "automation": "Automation",
     "sakerhet": "IT-säkerhet", "dokumentation": "Guider & anteckningar", "filer": "Filer",
+    "proxmox": "Proxmox VE",
 }
 ITEM_FIELDS = ("title", "category", "content", "notes", "tags", "favorite", "filename",
                "filedata", "example_key", "project_ids", *METADATA)
@@ -88,6 +89,7 @@ def migrate(db):
         actor TEXT NOT NULL,action TEXT NOT NULL,target TEXT NOT NULL)""")
     db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
     db.execute("INSERT OR IGNORE INTO settings VALUES ('registration_open','true')")
+    db.execute("INSERT OR IGNORE INTO categories(key,name) VALUES ('proxmox','Proxmox VE')")
     seeded = db.execute("SELECT value FROM settings WHERE key='categories_seeded'").fetchone()
     if not seeded:
         for key, name in BUILTINS.items():

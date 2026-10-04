@@ -9,7 +9,7 @@ const builtInCategories = [
   ["natverk", "Nätverk", "⇄"], ["databaser", "Databaser & SQL", "▥"],
   ["utveckling", "Utveckling", "{ }"], ["automation", "Automation", "⚙"],
   ["sakerhet", "IT-säkerhet", "◇"], ["dokumentation", "Guider & anteckningar", "▧"],
-  ["filer", "Filer", "↥"]
+  ["filer", "Filer", "↥"], ["proxmox", "Proxmox VE", "▣"]
 ];
 let categories = [...builtInCategories], items = [], active = "all", editing = null, detailItem = null, loading = true;
 let currentHistoryItem = null, currentHistory = [], currentUser = null;

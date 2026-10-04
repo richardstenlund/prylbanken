@@ -1,4 +1,5 @@
 """Original command templates for optional library starter packs."""
+from proxmox_catalog import PACK as PROXMOX_PACK, EXAMPLES as PROXMOX_EXAMPLES
 
 PACKS = [
     {"id": "spel", "title": "Spelservrar & SteamCMD", "description": "SteamCMD, Windows- och Linux-starter för 21 spel samt serververktyg."},
@@ -536,3 +537,6 @@ for key, title, category, content, notes, source in [
      "https://developer.valvesoftware.com/wiki/SteamCMD"),
 ]:
     add("game-tools-" + key, "spel", title, category, content, notes, "spelserver, steamcmd, drift", source)
+
+PACKS.append(PROXMOX_PACK)
+EXAMPLES.extend(PROXMOX_EXAMPLES)
