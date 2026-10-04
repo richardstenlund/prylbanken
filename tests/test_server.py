@@ -328,39 +328,80 @@ class ServerTests(unittest.TestCase):
 
     def test_catalog_output_and_import_all(self):
         catalog = self.request("GET", "/api/examples")[1]
-        self.assertEqual(len(catalog["packs"]), 6)
-        self.assertEqual(len(catalog["items"]), 60)
-        self.assertEqual(len({item["key"] for item in catalog["items"]}), 60)
-        self.assertEqual(sum(pack["count"] for pack in catalog["packs"]), 60)
+        self.assertEqual(len(catalog["packs"]), 9)
+        self.assertEqual(len(catalog["items"]), 120)
+        self.assertEqual(len({item["key"] for item in catalog["items"]}), 120)
+        self.assertEqual(sum(pack["count"] for pack in catalog["packs"]), 120)
         for item in catalog["items"]:
             self.assertTrue(item["content"])
             self.assertIn("Referens: https://", item["notes"])
         packs = [pack["id"] for pack in catalog["packs"]]
         status, result, _ = self.request("POST", "/api/examples", {"packs": packs})
         self.assertEqual(status, 201)
-        self.assertEqual(result, {"added": 60, "skipped": 0})
+        self.assertEqual(result, {"added": 120, "skipped": 0})
         rows = self.request("GET", "/api/items")[1]
-        self.assertEqual(len(rows), 60)
+        self.assertEqual(len(rows), 120)
         self.assertTrue(any("Valheim" in row["title"] for row in rows))
         self.assertTrue(any("Counter-Strike 2" in row["title"] for row in rows))
 
     def test_catalog_idempotency_preserves_edits_and_allows_deleted_templates(self):
         result = self.request("POST", "/api/examples", {"packs": ["docker"]})[1]
-        self.assertEqual(result["added"], 8)
+        self.assertEqual(result["added"], 15)
         rows = self.request("GET", "/api/items")[1]
         edited = {**rows[0], "content": "MY CUSTOM COMMAND"}
         self.request("PUT", f'/api/items/{edited["id"]}', edited)
         result = self.request("POST", "/api/examples", {"packs": ["docker", "docker"]})[1]
-        self.assertEqual(result, {"added": 0, "skipped": 8})
+        self.assertEqual(result, {"added": 0, "skipped": 15})
         self.assertTrue(any(row["content"] == "MY CUSTOM COMMAND" for row in self.request("GET", "/api/items")[1]))
         self.request("DELETE", f'/api/items/{rows[1]["id"]}')
         self.assertEqual(self.request("POST", "/api/examples", {"packs": ["docker"]})[1],
-                         {"added": 1, "skipped": 7})
+                         {"added": 1, "skipped": 14})
         latest = max(self.request("GET", "/api/items")[1], key=lambda row: row["id"])
         self.request("DELETE", f'/api/items/{latest["id"]}')
         self.create(title="Manual item reusing a deleted ID")
         self.assertEqual(self.request("POST", "/api/examples", {"packs": ["docker"]})[1],
-                         {"added": 1, "skipped": 7})
+                         {"added": 1, "skipped": 14})
+
+    def test_expanded_catalog_pack_shapes_and_safety(self):
+        catalog = self.request("GET", "/api/examples")[1]
+        packs = {pack["id"]: pack["count"] for pack in catalog["packs"]}
+        self.assertEqual(packs["containers"], 12)
+        self.assertEqual(packs["program"], 16)
+        self.assertEqual(packs["skript"], 12)
+        for item in catalog["items"]:
+            self.assertIn(item["pack"], packs)
+            self.assertLessEqual(len(item["title"]), 200)
+            self.assertLessEqual(len(item["content"]), 200000)
+            self.assertLessEqual(len(item["notes"]), 10000)
+            if item["pack"] == "containers":
+                self.assertTrue(item["content"].startswith("services:\n"))
+                self.assertIn("restart: unless-stopped", item["content"])
+                self.assertIn("localhost", item["notes"])
+                ports = [line.strip() for line in item["content"].splitlines()
+                         if line.strip().startswith('- "')]
+                self.assertTrue(all(line.startswith('- "127.0.0.1:') for line in ports))
+                self.assertNotIn("privileged:", item["content"])
+                self.assertNotIn("/var/run/docker.sock", item["content"])
+        status, result, _ = self.request("POST", "/api/examples",
+                                         {"packs": ["containers", "program", "skript"]})
+        self.assertEqual(status, 201)
+        self.assertEqual(result, {"added": 40, "skipped": 0})
+
+    def test_expanded_catalog_preserves_original_sixty_templates(self):
+        catalog = self.request("GET", "/api/examples")[1]
+        original = catalog["items"][:60]
+        with closing(sqlite3.connect(Path(self.directory.name) / "library.sqlite")) as db, db:
+            for item in original:
+                db.execute("INSERT INTO items(title,category,content,notes,tags,example_key) VALUES (?,?,?,?,?,?)",
+                           (item["title"], item["category"], item["content"], item["notes"], item["tags"], item["key"]))
+        row = self.request("GET", "/api/items")[1][0]
+        self.request("PUT", f'/api/items/{row["id"]}', {**row, "content": "MY EDITED ORIGINAL"})
+        packs = [pack["id"] for pack in catalog["packs"]]
+        result = self.request("POST", "/api/examples", {"packs": packs})[1]
+        self.assertEqual(result, {"added": 60, "skipped": 60})
+        rows = self.request("GET", "/api/items")[1]
+        self.assertEqual(len(rows), 120)
+        self.assertTrue(any(item["content"] == "MY EDITED ORIGINAL" for item in rows))
 
     def test_catalog_requires_auth_and_valid_selection(self):
         self.assertEqual(self.request("GET", "/api/examples", auth=False)[0], 401)

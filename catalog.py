@@ -7,6 +7,9 @@ PACKS = [
     {"id": "windows", "title": "Windows & PowerShell", "description": "Tjänster, nätverk, loggar och filer."},
     {"id": "natverk", "title": "Nätverk & SSH", "description": "DNS, HTTP, portar och säkra anslutningar."},
     {"id": "utveckling", "title": "Git, Python & SQL", "description": "Vardagsverktyg för kod och databaser."},
+    {"id": "containers", "title": "Färdiga containerstarter", "description": "Compose-mallar för webb, databaser och självhostade program."},
+    {"id": "program", "title": "Serverprogram & tjänster", "description": "Starta och kontrollera webbservrar, databaser och utvecklingsappar."},
+    {"id": "skript", "title": "Skript & automation", "description": "Systemd, BAT, PowerShell, backup och schemaläggning."},
 ]
 EXAMPLES = []
 
@@ -155,3 +158,240 @@ for key, title, category, content, notes, source in [
     ("sqlite-backup", "SQLite – konsistent online-backup", "databaser", "sqlite3 ./library.sqlite \".backup './library-backup.sqlite'\"", "Kräver sqlite3 CLI. Använd nytt backupfilnamn och rätt befintlig databas. För Prylbanken rekommenderas export eller stoppad volymbackup.", "https://www.sqlite.org/cli.html"),
 ]:
     add(key, "utveckling", title, category, content, notes, "utveckling, verktyg", source)
+
+
+def container(key, name, image, ports, volumes, extra, notes, source):
+    content = f"services:\n  {key}:\n    image: {image}\n    restart: unless-stopped\n"
+    if ports:
+        content += "    ports:\n" + "".join(f'      - "127.0.0.1:{port}"\n' for port in ports)
+    if volumes:
+        content += "    volumes:\n" + "".join(f"      - {mount}\n" for mount in volumes)
+    if extra:
+        content += extra
+    named = [mount.split(":")[0] for mount in volumes if not mount.startswith((".", "/"))]
+    if named:
+        content += "\nvolumes:\n" + "".join(f"  {volume}:\n" for volume in named)
+    add("compose-" + key, "containers", name + " – compose.yaml", "docker", content,
+        "Spara som compose.yaml i en egen projektmapp. Kör docker compose up -d och docker compose logs --tail=50. "
+        "Publicerade portar binds bara till localhost; använd SSH-tunnel eller HTTPS-reverseproxy för andra enheter. "
+        "Skapa angivna lokala filer och fyll i .env före start. Säkerhetskopiera volymer före uppgradering. "
+        "Image-taggar kan uppdateras; lås en testad version/digest för produktion. " + notes,
+        f"docker, compose, {key}, start", source)
+
+
+container("nginx", "Nginx – statisk webbplats", "nginx:stable-alpine", ["8082:80"],
+          ["./html:/usr/share/nginx/html:ro"], "",
+          "Skapa html/index.html. Ändra hostporten om 8082 används.", "https://hub.docker.com/_/nginx")
+container("apache", "Apache HTTP Server", "httpd:2.4-alpine", ["8083:80"],
+          ["./html:/usr/local/apache2/htdocs:ro"], "",
+          "Skapa html/index.html. TLS och proxykonfiguration ingår inte.", "https://hub.docker.com/_/httpd")
+container("caddy", "Caddy – lokal webbserver", "caddy:2-alpine", ["8084:80"],
+          ["./Caddyfile:/etc/caddy/Caddyfile:ro", "./html:/srv:ro", "caddy-data:/data", "caddy-config:/config"], "",
+          "Skapa Caddyfile med följande innehåll:\n:80 {\n    root * /srv\n    file_server\n}\n"
+          "Skapa html/index.html. Detta är lokal HTTP, inte automatisk publik HTTPS.",
+          "https://caddyserver.com/docs/running#docker-compose")
+container("postgres", "PostgreSQL 17", "postgres:17-alpine", ["5432:5432"],
+          ["postgres-data:/var/lib/postgresql/data"],
+          "    environment:\n      POSTGRES_DB: app\n      POSTGRES_USER: app\n"
+          "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Ange POSTGRES_PASSWORD i .env}\n",
+          "Ange ett starkt POSTGRES_PASSWORD i .env. Volymsökvägen gäller PostgreSQL 17; byt inte huvudversion "
+          "utan planerad databasmigration. Miljövariablerna initierar en ny databas, inte en befintlig.",
+          "https://hub.docker.com/_/postgres")
+container("mariadb", "MariaDB", "mariadb:11", ["3306:3306"], ["mariadb-data:/var/lib/mysql"],
+          "    environment:\n      MARIADB_DATABASE: app\n      MARIADB_USER: app\n"
+          "      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?Ange MARIADB_PASSWORD i .env}\n"
+          "      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Ange MARIADB_ROOT_PASSWORD i .env}\n",
+          "Ange två separata starka lösenord i .env. Miljövariablerna används vid första initieringen.",
+          "https://hub.docker.com/_/mariadb")
+container("redis", "Redis – intern cache", "redis:7-alpine", [], ["redis-data:/data"],
+          '    command: ["redis-server", "--appendonly", "yes"]\n',
+          "Ingen hostport publiceras. Endast för betrodda tjänster i samma Compose-nätverk. "
+          "Anslut till redis:6379 från en annan tjänst i projektet. Konfigurera ACL/TLS före annan åtkomst.",
+          "https://hub.docker.com/_/redis")
+container("rabbitmq", "RabbitMQ – meddelandekö", "rabbitmq:4-management", ["5672:5672", "15672:15672"],
+          ["rabbitmq-data:/var/lib/rabbitmq"],
+          "    hostname: rabbitmq\n    environment:\n      RABBITMQ_DEFAULT_USER: app\n"
+          "      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Ange RABBITMQ_PASSWORD i .env}\n",
+          "Ange RABBITMQ_PASSWORD i .env. Webbadministration finns lokalt på port 15672. "
+          "Behåll nodens hostname för befintliga data.", "https://hub.docker.com/_/rabbitmq")
+container("gitea", "Gitea – Git-server", "gitea/gitea:1", ["3002:3000", "2222:22"], ["gitea-data:/data"],
+          '    environment:\n      GITEA__service__DISABLE_REGISTRATION: "true"\n',
+          "Slutför installationen och skapa första administratören i webben innan åtkomst ges till andra. "
+          "SQLite passar för ett litet bibliotek. Ställ in extern ROOT_URL och SSH-port enligt dokumentationen.",
+          "https://docs.gitea.com/installation/install-with-docker")
+container("vaultwarden", "Vaultwarden – lösenordsvalv", "vaultwarden/server:latest", ["8085:80"],
+          ["vaultwarden-data:/data"], '    environment:\n      SIGNUPS_ALLOWED: "false"\n',
+          "Registrering är avstängd. Konfigurera säker konto-/inbjudningshantering enligt guiden innan användning. "
+          "HTTPS krävs för webbvalvet utanför localhost. Säkerhetskopian innehåller känsliga data.",
+          "https://github.com/dani-garcia/vaultwarden/wiki")
+container("uptime-kuma", "Uptime Kuma – tillgänglighetskontroll", "louislam/uptime-kuma:2", ["3003:3001"],
+          ["uptime-data:/app/data"], "",
+          "Skapa första administratören i webbgränssnittet. För befintliga v1-data, läs migrationsguiden först.",
+          "https://github.com/louislam/uptime-kuma")
+container("grafana", "Grafana – dashboards", "grafana/grafana:latest", ["3004:3000"],
+          ["grafana-data:/var/lib/grafana"],
+          "    environment:\n      GF_SECURITY_ADMIN_USER: admin\n"
+          "      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Ange GRAFANA_PASSWORD i .env}\n"
+          '      GF_USERS_ALLOW_SIGN_UP: "false"\n',
+          "Ange GRAFANA_PASSWORD i .env. Lägg till datakällor i webbgränssnittet. "
+          "Adminlösenordet initierar bara nya data.", "https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/")
+container("prometheus", "Prometheus – mätvärden", "prom/prometheus:latest", ["9090:9090"],
+          ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prometheus-data:/prometheus"], "",
+          "Skapa prometheus.yml med följande innehåll för att övervaka Prometheus självt:\n"
+          "global:\n  scrape_interval: 15s\nscrape_configs:\n  - job_name: prometheus\n"
+          "    static_configs:\n      - targets: ['localhost:9090']\n"
+          "Mallen är inte startklar utan konfigurationsfil. Ingen autentisering ingår; behåll privat åtkomst.",
+          "https://prometheus.io/docs/prometheus/latest/installation/")
+
+for key, title, category, content, notes, source in [
+    ("nginx-start", "Nginx – testa och starta tjänsten", "linux",
+     "sudo nginx -t\n# Fortsätt bara om testet godkändes:\nsudo systemctl start nginx\nsystemctl status nginx --no-pager",
+     "Kräver installerad Nginx och systemd. Granska vilken adress/port din webbplats binds till.",
+     "https://nginx.org/en/docs/beginners_guide.html"),
+    ("nginx-reload", "Nginx – ladda om konfiguration", "linux",
+     "sudo nginx -t && sudo systemctl reload nginx", "Laddar bara om vid godkänt konfigurationstest. Befintliga anslutningar avslutas normalt inte.",
+     "https://nginx.org/en/docs/beginners_guide.html"),
+    ("caddy-start", "Caddy – kör en Caddyfile", "linux",
+     "caddy validate --config ./Caddyfile && caddy run --config ./Caddyfile",
+     "Kräver installerad Caddy och egen Caddyfile. Kör i förgrunden. Publik automatisk HTTPS kräver DNS och nåbara portar.",
+     "https://caddyserver.com/docs/command-line"),
+    ("apache-start", "Apache på Debian/Ubuntu – starta", "linux",
+     "sudo apache2ctl configtest\n# Fortsätt bara efter Syntax OK:\nsudo systemctl start apache2",
+     "För Debian/Ubuntu med Apache installerat. Andra distributioner använder ofta tjänsten httpd.",
+     "https://httpd.apache.org/docs/2.4/invoking.html"),
+    ("python-http", "Python – lokal HTTP-filserver", "utveckling",
+     "python3 -m http.server 8000 --bind 127.0.0.1 --directory ./public",
+     "Utvecklingstest, inte produktionsserver. Alla filer i public kan hämtas; servera aldrig hemkatalog eller hemligheter.",
+     "https://docs.python.org/3/library/http.server.html"),
+    ("node-start", "Node.js – starta en serverfil", "utveckling",
+     "node server.js", "Kräver Node.js och din egen server.js. Bindningsadress och port bestäms av programmet. Kör i projektmappen.",
+     "https://nodejs.org/api/cli.html"),
+    ("npm-start", "Node.js – starta via npm", "utveckling",
+     "npm ci && npm start", "Kräver package-lock.json och ett start-script. Kör bara i ett betrott projekt; paketens installationsskript kan köra kod.",
+     "https://docs.npmjs.com/cli/commands/npm-start"),
+    ("dotnet-start", ".NET – kör publicerad webbapp lokalt", "utveckling",
+     'dotnet MyApp.dll --urls "http://127.0.0.1:5000"', "Byt MyApp.dll. Kräver kompatibel .NET-runtime och publicerad ASP.NET Core-app.",
+     "https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel/endpoints"),
+    ("java-start", "Java – kör en JAR-server", "utveckling",
+     "java -Xms512m -Xmx2g -jar app.jar", "Byt app.jar och RAM. Kräver appens Java-version. Nätverksinställningar är appspecifika.",
+     "https://docs.oracle.com/en/java/javase/21/docs/specs/man/java.html"),
+    ("uvicorn-start", "Uvicorn – lokal ASGI-server", "utveckling",
+     "python -m uvicorn main:app --host 127.0.0.1 --port 8000", "Kräver installerad Uvicorn och ASGI-objektet app i main.py. Ingen automatisk installation ingår.",
+     "https://www.uvicorn.org/settings/"),
+    ("gunicorn-start", "Gunicorn – WSGI på Linux", "linux",
+     "gunicorn --workers 2 --bind 127.0.0.1:8000 app:app", "Kräver Gunicorn och WSGI-app. Använd reverseproxy och tjänstehantering för drift.",
+     "https://docs.gunicorn.org/en/stable/run.html"),
+    ("redis-start", "Redis – lokal tillfällig server", "linux",
+     "redis-server --bind 127.0.0.1 --protected-mode yes --port 6379",
+     "Kräver Redis installerat. Kör inte parallellt med en befintlig instans på samma port. Konfigurera separat datakatalog före beständig drift.",
+     "https://redis.io/docs/latest/operate/oss_and_stack/management/config/"),
+    ("postgres-start", "PostgreSQL på Debian/Ubuntu – starta", "linux",
+     "sudo systemctl start postgresql\npg_isready -h 127.0.0.1 -p 5432",
+     "Kräver installerad och initierad PostgreSQL-kluster. Distributionens tjänstenamn kan skilja sig. pg_isready kontrollerar anslutningsstatus.",
+     "https://www.postgresql.org/docs/17/app-pg-isready.html"),
+    ("mariadb-start", "MariaDB – starta systemd-tjänst", "linux",
+     "sudo systemctl start mariadb\nsystemctl status mariadb --no-pager", "Kräver installerad MariaDB. Konfigurera konton och bindningsadress separat.",
+     "https://mariadb.com/kb/en/systemd/"),
+    ("tmux-start", "tmux – server i separat terminalsession", "linux",
+     "tmux new-session -s spelserver\n# Kör ditt serverkommando i sessionen.\n# Koppla loss: Ctrl+B, sedan D.\n# Återanslut:\ntmux attach-session -t spelserver",
+     "Kräver tmux. Terminalsessioner överlever SSH-frånkoppling men inte hostomstart. Använd systemd för automatisk drift.",
+     "https://github.com/tmux/tmux/wiki"),
+    ("iis-start", "Windows IIS – starta webbplats", "windows",
+     "Import-Module WebAdministration\nStart-Website -Name 'MinWebbplats'\nGet-Website",
+     "Kräver IIS, WebAdministration, befintlig webbplats och administratörs-PowerShell. Ändra webbplatsnamnet och kontrollera bindings.",
+     "https://learn.microsoft.com/powershell/module/webadministration/start-website"),
+]:
+    add("program-" + key, "program", title, category, content, notes, "serverprogram, start, drift", source)
+
+for key, title, category, content, notes, source in [
+    ("systemd-unit", "Systemd – mall för en spelservertjänst", "automation",
+     "[Unit]\nDescription=Min spelserver\nAfter=network.target\n\n[Service]\nType=simple\nUser=spelserver\n"
+     "WorkingDirectory=/srv/spelserver\nExecStart=/srv/spelserver/start-server.sh\nRestart=on-failure\n"
+     "RestartSec=10\nTimeoutStopSec=120\nNoNewPrivileges=true\n\n[Install]\nWantedBy=multi-user.target\n",
+     "Spara som /etc/systemd/system/spelserver.service. Skapa en separat användare och rätt katalogbehörigheter först. "
+     "Startskriptet ska vara körbart, köra i förgrunden och använda exec för serverprocessen. Anpassa stopptiden till spelets sparning.",
+     "https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html"),
+    ("systemd-enable", "Systemd – aktivera en egen tjänst", "automation",
+     "sudo systemctl daemon-reload\nsudo systemctl enable --now spelserver.service\nsystemctl status spelserver.service --no-pager",
+     "Först efter att du granskat och installerat en korrekt service-fil. --now startar tjänsten direkt och enable aktiverar vid hoststart.",
+     "https://www.freedesktop.org/software/systemd/man/latest/systemctl.html"),
+    ("shell-start", "Bash – startskript för Java-server", "automation",
+     '#!/bin/sh\nset -eu\ncd /srv/min-server\nexec java -Xms2G -Xmx4G -jar server.jar nogui\n',
+     "Anpassa mapp, JAR, Java-version och RAM. Spara med LF-radbrytningar. Kör sh start-server.sh eller ge bara denna fil körbehörighet.",
+     "https://www.gnu.org/software/bash/manual/bash.html"),
+    ("bat-java", "BAT – starta Java från skriptmappen", "bat",
+     '@echo off\ncd /d "%~dp0"\njava -Xms2G -Xmx4G -jar server.jar nogui\npause\n',
+     "Spara som start-server.bat bredvid server.jar. Byt RAM och Java-version efter serverkrav.",
+     "https://learn.microsoft.com/windows-server/administration/windows-commands/call"),
+    ("bat-compose", "BAT – starta ett Compose-projekt", "bat",
+     '@echo off\ncd /d "%~dp0"\ndocker compose up -d\nif errorlevel 1 exit /b 1\ndocker compose ps\npause\n',
+     "Spara i mappen med compose.yaml. Docker Desktop/Engine måste vara startat. Befintligt projektnamn och volymer behålls.",
+     COMPOSE),
+    ("ps-start", "PowerShell – startskript med kontroll", "automation",
+     '$ErrorActionPreference = "Stop"\nSet-Location $PSScriptRoot\n& java -Xms2G -Xmx4G -jar server.jar nogui\n'
+     'if ($LASTEXITCODE -ne 0) { throw "Servern avslutades med kod $LASTEXITCODE" }\n',
+     "Spara som start-server.ps1 bredvid JAR-filen. Följ lokal exekveringspolicy. Ändra inte säkerhetspolicy globalt för detta skript.",
+     "https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_scripts"),
+    ("cron-backup", "Cron – schemalägg ett backupskript", "automation",
+     "# Lägg till via crontab -e:\n0 3 * * * /bin/sh /srv/scripts/backup.sh >> /srv/scripts/backup.log 2>&1\n",
+     "Kör 03:00 enligt serverns tidszon. Skapa och testa backup.sh först. Cron har begränsad PATH; använd absoluta sökvägar. "
+     "Se till att loggfilen går att skriva och övervaka fel.",
+     "https://man7.org/linux/man-pages/man5/crontab.5.html"),
+    ("timer", "Systemd – daglig timer", "automation",
+     "[Unit]\nDescription=Daglig backup\n\n[Timer]\nOnCalendar=*-*-* 03:00:00\nPersistent=true\n"
+     "Unit=backup.service\n\n[Install]\nWantedBy=timers.target\n",
+     "Spara som backup.timer. Kräver en separat backup.service som utför en testad backup. Persistent kör en missad tid när timern återaktiveras.",
+     "https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html"),
+    ("backup-service", "Systemd – backupservice av typen oneshot", "automation",
+     "[Unit]\nDescription=Backup av serverdata\n\n[Service]\nType=oneshot\nUser=backup\n"
+     "ExecStart=/bin/sh /srv/scripts/backup.sh\nNoNewPrivileges=true\n",
+     "Spara som backup.service för timer-mallen. Skapa backup-användaren och ge bara nödvändiga rättigheter. "
+     "Backupskriptet måste ge felkod vid fel och hantera konsistenta databasbackuper.",
+     "https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html"),
+    ("rsync", "rsync – förhandsgranska en filbackup", "linux",
+     "rsync -av --dry-run /srv/data/ /mnt/backup/data/\n# Efter kontroll, utför kopian:\nrsync -av /srv/data/ /mnt/backup/data/",
+     "Kräver rsync och monterad backupdisk. Avslutande / kopierar mappens innehåll. Inget --delete används. "
+     "Stoppa databaser eller använd deras backupverktyg före filkopiering.",
+     "https://download.samba.org/pub/rsync/rsync.1"),
+    ("ps-scheduled", "PowerShell – schemalägg ett befintligt skript", "automation",
+     "$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -File C:\\Scripts\\backup.ps1'\n"
+     "$trigger = New-ScheduledTaskTrigger -Daily -At '03:00'\n"
+     "Register-ScheduledTask -TaskName 'MinBackup' -Action $action -Trigger $trigger -Description 'Daglig backup'\n",
+     "Kräver befintligt och testat skript; använd citerad filväg i Argument om den innehåller blanksteg. "
+     "Standarduppgiften körs under aktuell användares interaktiva konto. Obevakad drift kräver en planerad kontokonfiguration.",
+     "https://learn.microsoft.com/powershell/module/scheduledtasks/register-scheduledtask"),
+    ("env-file", "Miljöfil – mall för containerlösenord", "dokumentation",
+     "# .env - fyll i egna unika slumpmassiga losenord.\n"
+     "POSTGRES_PASSWORD=\nMARIADB_PASSWORD=\nMARIADB_ROOT_PASSWORD=\n"
+     "RABBITMQ_PASSWORD=\nGRAFANA_PASSWORD=\n",
+     "Fyll bara i de variabler som din Compose-mall kräver. Tomma lösenord nekas av mallarna. "
+     "Lägg .env i .gitignore, begränsa rättigheter med chmod 600 .env på Linux och dela aldrig innehållet. "
+     "Använd enkla citattecken runt värden med $ för att undvika Compose-interpolering.",
+     "https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/"),
+]:
+    add("script-" + key, "skript", title, category, content, notes, "skript, automation, backup", source)
+
+for key, pack, title, category, content, notes, source in [
+    ("compose-check", "docker", "Compose – validera utan att visa hemligheter", "docker", "docker compose config --quiet",
+     "Validerar YAML och miljövariabler utan att skriva ut den utvärderade konfigurationen.", COMPOSE),
+    ("compose-service", "docker", "Compose – lista tjänsternas namn", "docker", "docker compose config --services", "Visar tjänstenamn som kan användas i logs, restart och exec.", COMPOSE),
+    ("compose-health", "docker", "Compose – invänta friska containrar", "docker", "docker compose up -d --wait --wait-timeout 120", "Kräver Compose v2 med --wait. Tjänster utan healthcheck behöver bara vara running; skriv riktiga healthchecks för viktig funktionalitet.", COMPOSE),
+    ("compose-stop", "docker", "Compose – stoppa utan att radera", "docker", "docker compose stop\ndocker compose ps -a", "Stoppar tjänster men behåller containrar och volymer. Starta igen med docker compose start.", COMPOSE),
+    ("compose-top", "docker", "Compose – visa processer", "docker", "docker compose top", "Visar processer i projektets containrar. Ändrar inget.", COMPOSE),
+    ("docker-health", "docker", "Docker – granska en hälsokontroll", "docker", "docker inspect --format '{{json .State.Health}}' CONTAINER", "Byt CONTAINER. Visar null om containern inte har healthcheck.", DOCKER),
+    ("docker-copy", "docker", "Docker – hämta en loggfil", "docker", "docker cp CONTAINER:/app/logs/server.log ./server.log", "Byt container och befintlig filsökväg. Skriv till en ny lokal fil för att inte ersätta en tidigare kopia.", DOCKER),
+    ("linux-uptime", "linux", "Linux – hostens uptime", "linux", "uptime\nuname -a", "Visar körtid, load och kärnversion. Dela inte systeminformation okritiskt.", "https://www.gnu.org/software/coreutils/manual/coreutils.html"),
+    ("linux-find", "linux", "Linux – hitta konfigurationsfiler", "linux", "find /srv -type f -name '*.conf' -print", "Läser sökvägar utan att ändra filer. Byt basmapp; rättigheter kan begränsa resultatet.", "https://www.gnu.org/software/findutils/manual/html_mono/find.html"),
+    ("linux-tail", "linux", "Linux – följ en loggfil", "linux", "tail -n 100 -F /srv/app/server.log", "Byt loggsökväg. -F följer även när loggen roteras. Avsluta med Ctrl+C.", "https://www.gnu.org/software/coreutils/manual/coreutils.html"),
+    ("linux-time", "linux", "Linux – kontrollera tid och tidszon", "linux", "timedatectl status", "Kräver systemd. Fel tid kan störa TLS, sessioner och schemalagda jobb.", "https://www.freedesktop.org/software/systemd/man/latest/timedatectl.html"),
+    ("linux-list-timers", "linux", "Linux – visa aktiva timers", "automation", "systemctl list-timers --all --no-pager", "Visar kommande och senaste systemd-timerkörningar. Ändrar inget.", "https://www.freedesktop.org/software/systemd/man/latest/systemctl.html"),
+    ("windows-process", "windows", "PowerShell – processernas minne", "windows", "Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Name, Id, WorkingSet64", "Visar de 15 processer som använder mest working-set-minne. Stoppar inga processer.", "https://learn.microsoft.com/powershell/module/microsoft.powershell.management/get-process"),
+    ("windows-disks", "windows", "PowerShell – ledigt diskutrymme", "windows", "Get-Volume | Select-Object DriveLetter, FileSystemLabel, SizeRemaining, Size", "Visar volymer och utrymme i byte. Ändrar ingen disk.", "https://learn.microsoft.com/powershell/module/storage/get-volume"),
+    ("windows-listening", "windows", "PowerShell – lyssnande TCP-portar", "windows", "Get-NetTCPConnection -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess", "Visar TCP-portar och process-ID. UDP visas separat med Get-NetUDPEndpoint.", "https://learn.microsoft.com/powershell/module/nettcpip/get-nettcpconnection"),
+    ("network-route", "natverk", "Linux – IP och routing", "natverk", "ip address show\nip route show", "Visar nätverkskonfiguration utan att ändra den.", "https://man7.org/linux/man-pages/man8/ip.8.html"),
+    ("git-branch", "utveckling", "Git – skapa arbetsbranch", "utveckling", "git switch -c min-andring", "Byt branchnamn. Kräver Git 2.23+. Kommitta relevanta ändringar innan du byter arbetskontext.", "https://git-scm.com/docs/git-switch"),
+    ("git-remotes", "utveckling", "Git – kontrollera remotes", "utveckling", "git remote -v\ngit branch -vv", "Visar fjärr-URL och tracking. URL kan innehålla känsliga uppgifter om felaktigt konfigurerad.", "https://git-scm.com/docs/git-remote"),
+    ("python-tests", "utveckling", "Python – kör unittest", "utveckling", "python -m unittest discover -s tests -v", "Kör projektets testkod. Använd bara betrodda projekt och deras angivna Python-miljö.", "https://docs.python.org/3/library/unittest.html"),
+    ("sql-read", "utveckling", "SQL – grundmall för läsning", "databaser", "SELECT id, title\nFROM items\nORDER BY id DESC\nLIMIT 20;", "För SQLite/PostgreSQL/MariaDB med motsvarande schema. Kör som läsbehörig användare; anpassa tabell och kolumner.", "https://www.sqlite.org/lang_select.html"),
+]:
+    add("extra-" + key, pack, title, category, content, notes, "bra-att-ha, drift, verktyg", source)

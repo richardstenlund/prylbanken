@@ -124,9 +124,20 @@ för privat åtkomst.
 - Filkategorin visar alla poster med bifogade filer.
 - Stjärnan markerar favoriter. Standardordningen visar favoriter först, därefter
   senast uppdaterade poster. `/` fokuserar sökfältet.
-- **Startbibliotek** låter dig välja bland sex paket med totalt 60 mallar:
+- **Startbibliotek** låter dig välja bland nio paket med totalt **120 mallar**:
   spelservrar/SteamCMD, Docker, Linux/backup, Windows/PowerShell, nätverk/SSH och
-  Git/Python/SQL. Samma knapp finns i den tomma samlingen.
+  Git/Python/SQL samt containerstarter, serverprogram och skript/automation.
+  Samma knapp finns i den tomma samlingen.
+- Containerpaketet innehåller 12 Compose-mallar: Nginx, Apache, Caddy,
+  PostgreSQL, MariaDB, Redis, RabbitMQ, Gitea, Vaultwarden, Uptime Kuma,
+  Grafana och Prometheus. Publicerade portar binds till localhost; Redis
+  har ingen publicerad hostport. Konfigurationsfiler och lösenord som
+  anges i anteckningarna måste skapas innan körning. Mallarna är separata
+  projekt, inte en gemensam produktionsstack.
+- Serverprogram-paketet innehåller 16 startmallar för bland annat Node.js,
+  .NET, Java, Python, Uvicorn, Gunicorn, IIS, databaser och webbservrar.
+  Skriptpaketet innehåller 12 mallar för systemd, timers, cron, BAT,
+  PowerShell, miljöfiler och backup. Programmen måste finnas installerade.
 - Spelmallarna omfattar Valheim, Rust, Palworld, Satisfactory, CS2, Team Fortress 2,
   Minecraft Java och Bedrock, Factorio, Terraria samt 7 Days to Die.
   Plattformar och installationsmetoder varierar per spel.
