@@ -37,6 +37,7 @@ def related_ids(db, payload, old=None, restoring=False):
 
 
 def guide_payload(db, payload, old=None):
+    from registry import server_ids
     if not isinstance(payload, dict):
         raise ValueError("Ogiltig guide.")
     result = {}
@@ -49,6 +50,8 @@ def guide_payload(db, payload, old=None):
     if not isinstance(steps, list) or not 1 <= len(steps) <= 100:
         raise ValueError("En guide måste innehålla 1–100 steg.")
     old_keys = {step["key"] for step in json.loads(old["steps"])} if old else set()
+    new_servers = server_ids(db, payload, old)
+    changed_servers = old is not None and set(json.loads(new_servers)) != set(json.loads(old["server_ids"]))
     keys, normalized = set(), []
     for step in steps:
         if not isinstance(step, dict) or not isinstance(step.get("text"), str) or not 1 <= len(step["text"].strip()) <= 2000:
@@ -66,10 +69,11 @@ def guide_payload(db, payload, old=None):
             if not previous or previous.get("item_id") != item_id:
                 raise ValueError("Stegets länkade post finns inte i biblioteket.")
         previous = next((s for s in json.loads(old["steps"]) if s["key"] == key), None) if old else None
-        if previous and (previous["text"] != step["text"] or previous.get("item_id") != item_id):
+        if previous and (changed_servers or previous["text"] != step["text"] or previous.get("item_id") != item_id):
             key = secrets.token_hex(16)
         normalized.append({"key": key, "text": step["text"], "item_id": item_id})
     result["steps"] = json.dumps(normalized, ensure_ascii=False)
+    result["server_ids"] = new_servers
     return result
 
 
@@ -104,12 +108,15 @@ def export_zip(db, project_id):
                 archive.writestr(path, row["filedata"])
                 index.append("   Bilaga: " + path)
             row["project_ids"] = [project_id]
+            row["server_ids"] = json.loads(row["server_ids"])
             row["related_ids"] = json.loads(row["related_ids"])
             row["filedata"] = base64.b64encode(row["filedata"]).decode() if row["filedata"] is not None else None
             payload_items.append(row)
         archive.writestr("INDEX.txt", "\n".join(index))
         archive.writestr("library.json", json.dumps({"version": 1, "items": payload_items,
-                                                    "projects": [dict(project)]}, ensure_ascii=False))
+                                                    "projects": [dict(project)],
+                                                    "servers": [dict(row) for row in db.execute("SELECT * FROM servers")
+                                                                if any(row["id"] in item["server_ids"] for item in payload_items)]}, ensure_ascii=False))
     return data.getvalue()
 
 
@@ -125,7 +132,7 @@ def get(handler, db, path):
         for row in db.execute("SELECT * FROM guides ORDER BY title,id"):
             completed = [r["step_key"] for r in db.execute(
                 "SELECT step_key FROM guide_progress WHERE user_id=? AND guide_id=?", (uid, row["id"]))]
-            guides.append({**dict(row), "steps": json.loads(row["steps"]), "completed": completed})
+            guides.append({**dict(row), "steps": json.loads(row["steps"]), "server_ids": json.loads(row["server_ids"]), "completed": completed})
         handler.reply(200, guides)
         return True
     match = re.fullmatch(r"/api/projects/(\d+)/export", path)
@@ -191,14 +198,14 @@ def mutate(handler, db, method, path):
                 raise ValueError("Högst 200 guider.")
             values = guide_payload(db, handler.read_json(300000), old)
             if old:
-                db.execute("UPDATE guides SET title=?,description=?,prerequisites=?,steps=? WHERE id=?",
+                db.execute("UPDATE guides SET title=?,description=?,prerequisites=?,steps=?,server_ids=? WHERE id=?",
                            (*values.values(), guide_id))
                 keys = {step["key"] for step in json.loads(values["steps"])}
                 for row in db.execute("SELECT DISTINCT step_key FROM guide_progress WHERE guide_id=?", (guide_id,)).fetchall():
                     if row["step_key"] not in keys:
                         db.execute("DELETE FROM guide_progress WHERE guide_id=? AND step_key=?", (guide_id, row["step_key"]))
             else:
-                guide_id = db.execute("INSERT INTO guides(title,description,prerequisites,steps) VALUES (?,?,?,?)",
+                guide_id = db.execute("INSERT INTO guides(title,description,prerequisites,steps,server_ids) VALUES (?,?,?,?,?)",
                                       tuple(values.values())).lastrowid
         audit(db, handler.user["username"], "guide." + method.lower(), guide_id)
         db.commit()

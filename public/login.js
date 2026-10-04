@@ -89,7 +89,9 @@ form.addEventListener("submit", async event => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Inloggningen misslyckades.");
-    location.replace("/" + (location.hash.startsWith("#capture=") && location.hash.length <= 18000 ? location.hash : ""));
+    const validHash = (location.hash.startsWith("#capture=") && location.hash.length <= 18000) ||
+      /^#(?:item|guide|project|server)=\d+$/.test(location.hash);
+    location.replace("/" + (validHash ? location.hash : ""));
   } catch (error) {
     errorBox.textContent = error.message;
     errorBox.hidden = false;

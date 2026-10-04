@@ -63,14 +63,14 @@ class ServerTests(unittest.TestCase):
             db.execute("DELETE FROM registration_attempts")
             db.execute("DELETE FROM users WHERE username != 'admin'")
             for table in ("history", "activity", "projects", "saved_searches", "guides", "guide_progress",
-                          "personal_items"):
+                          "personal_items", "servers", "profiles", "link_checks", "link_attempts"):
                 db.execute(f"DELETE FROM {table}")
         status, body, headers = self.request("POST", "/api/login",
                                             {"username": "admin", "password": "integration-test-password"}, auth=False)
         self.assertEqual(status, 200, body)
         type(self).cookie = headers["Set-Cookie"].split(";", 1)[0]
         type(self).csrf = self.request("GET", "/api/me")[1]["csrf"]
-        self.request("PUT", "/api/settings", {"registration_open": True})
+        self.request("PUT", "/api/settings", {"registration_open": True, "link_check_enabled": False})
 
     @classmethod
     def request(cls, method, path, payload=None, auth=True, extra=None):

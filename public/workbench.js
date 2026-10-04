@@ -97,6 +97,7 @@ const relatedChoices = el("fieldset", "account-form"); relatedChoices.id = "edit
 $("#existing-file").after(labeled("Riskklass (manuell bedömning)", riskInput),
   labeled("Granska igen efter antal månader", monthsInput), labeled("Senast granskad", reviewedInput), relatedChoices);
 function populateWorkbenchEditor(item) {
+  populateExpansionEditor(item);
   riskInput.value = item?.risk || "unclassified"; monthsInput.value = item?.review_months || "6";
   reviewedInput.value = item?.reviewed_at || "";
   relatedChoices.replaceChildren(el("legend", "", "Relaterade poster / förutsättningar"));
@@ -113,10 +114,11 @@ function populateWorkbenchEditor(item) {
   });
 }
 function workbenchEditorPayload() {
-  return {risk:riskInput.value, review_months:monthsInput.value, reviewed_at:reviewedInput.value,
+  return {...expansionEditorPayload(), risk:riskInput.value, review_months:monthsInput.value, reviewed_at:reviewedInput.value,
     related_ids:[...relatedChoices.querySelectorAll("input:checked")].map(input => Number(input.value))};
 }
 function appendWorkbenchTools(body, item) {
+  appendExpansionTools(body, item);
   body.append(riskBadge(item));
   const due = LibraryTools.reviewDue(item);
   body.append(el("p", due.due ? "review-warning" : "muted",
@@ -246,6 +248,7 @@ function editGuide(guide = null) {
   editingGuide = guide; guideForm.reset(); stepRows.replaceChildren(); $("#guide-editor-error").hidden = true;
   for (const field of ["title","description","prerequisites"]) guideForm.elements[field].value = guide?.[field] || "";
   if (guide) guide.steps.forEach(addStepRow); else addStepRow();
+  populateGuideServers(guide);
   guideEditor.showModal();
 }
 guideForm.addEventListener("submit", async event => {
@@ -254,6 +257,7 @@ guideForm.addEventListener("submit", async event => {
     const payload = Object.fromEntries(["title","description","prerequisites"].map(name => [name, guideForm.elements[name].value]));
     payload.steps = [...stepRows.children].map(row => ({...(row.dataset.key ? {key:row.dataset.key} : {}),
       text:row.querySelector("textarea").value, item_id:Number(row.querySelector("select").value) || null}));
+    payload.server_ids = guideServerPayload();
     await api(editingGuide ? `/api/guides/${editingGuide.id}` : "/api/guides", editingGuide ? "PUT" : "POST", payload);
     guideEditor.close(); await showGuides(); notify("Guiden sparades.");
   } catch (failure) { showError(failure, $("#guide-editor-error")); }
@@ -271,6 +275,7 @@ async function showGuides() {
       const heading = el("h3", "", `${guide.title} (${guide.completed.length}/${guide.steps.length})`);
       section.append(heading, el("p", "detail-notes", guide.description),
         el("h4", "", "Förberedelser"), el("p", "detail-notes", guide.prerequisites || "Inga angivna."));
+      appendGuideSharing(section, guide);
       guide.steps.forEach((step, index) => {
         const row = el("div", "guide-step");
         const checkbox = document.createElement("input"); checkbox.type = "checkbox";
@@ -304,5 +309,3 @@ async function showGuides() {
   } catch (failure) { showError(failure, $("#guides-error")); }
 }
 $(".toolbar").append(action("Checklistor & guider", "secondary", () => { guidesDialog.showModal(); showGuides(); }));
-
-boot();

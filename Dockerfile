@@ -1,7 +1,7 @@
 FROM python:3.13-alpine
 WORKDIR /app
 RUN addgroup -S app && adduser -S app -G app && mkdir /data /backups && chown app:app /data /backups
-COPY --chown=app:app server.py catalog.py proxmox_catalog.py backend.py library.py workbench.py ./
+COPY --chown=app:app server.py catalog.py proxmox_catalog.py backend.py library.py workbench.py registry.py linkcheck.py ./
 COPY --chown=app:app public ./public
 ENV DATA_DIR=/data BACKUP_DIR=/backups PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER app

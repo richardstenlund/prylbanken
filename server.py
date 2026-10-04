@@ -18,6 +18,8 @@ from backend import (DB_LOCK, METADATA, BUILTINS, Backups, audit, snapshot, migr
                      category_payload, restore_example_key)
 from library import ROLES, named, attachments, fingerprint, project_ids, search_filters
 import workbench
+import registry
+import linkcheck
 
 ROOT = Path(__file__).parent
 DATA = Path(os.environ.get("DATA_DIR", str(ROOT / "data")))
@@ -158,7 +160,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def allowed(self, method, path):
         role = self.user["role"]
-        admin = path.startswith(("/api/users", "/api/settings", "/api/backups")) or path == "/api/activity"
+        admin = path.startswith(("/api/users", "/api/settings", "/api/backups")) or path in ("/api/activity", "/api/storage")
         if role != "admin" and admin:
             self.reply(403, {"error": "Administratörsbehörighet krävs."})
             return False
@@ -208,7 +210,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def get(self):
         path = urlsplit(self.path).path
-        if path in ("/", "/login", "/app.js", "/features.js", "/workbench.js", "/library-tools.js", "/login.js", "/style.css"):
+        if path in ("/", "/login", "/app.js", "/features.js", "/workbench.js", "/library-tools.js", "/login.js", "/style.css",
+                    "/expansion.js", "/manifest.webmanifest", "/service-worker.js", "/icon.svg", "/icon-192.png", "/icon-512.png"):
             if path == "/" and not self.session():
                 self.reply(303, "", headers={"Location": "/login"})
                 return
@@ -218,6 +221,12 @@ class Handler(BaseHTTPRequestHandler):
                               "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                               "/features.js": ("features.js", "text/javascript; charset=utf-8"),
                               "/workbench.js": ("workbench.js", "text/javascript; charset=utf-8"),
+                              "/expansion.js": ("expansion.js", "text/javascript; charset=utf-8"),
+                              "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+                              "/service-worker.js": ("service-worker.js", "text/javascript; charset=utf-8"),
+                              "/icon.svg": ("icon.svg", "image/svg+xml"),
+                              "/icon-192.png": ("icon-192.png", "image/png"),
+                              "/icon-512.png": ("icon-512.png", "image/png"),
                               "/library-tools.js": ("library-tools.js", "text/javascript; charset=utf-8"),
                               "/style.css": ("style.css", "text/css; charset=utf-8")}[path]
             self.reply(200, (ROOT / "public" / filename).read_bytes(), mime)
@@ -249,6 +258,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, self.public_user())
                 return
             if workbench.get(self, db, path):
+                return
+            if registry.get(self, db, path, DATA, BACKUPS):
                 return
             if path == "/api/users":
                 rows = db.execute("SELECT id,username,created,active,role FROM users ORDER BY username").fetchall()
@@ -289,10 +300,10 @@ class Handler(BaseHTTPRequestHandler):
                 condition = "deleted_at IS NULL" if path == "/api/items" else "deleted_at IS NOT NULL"
                 rows = db.execute(
                     "SELECT id,title,category,content,notes,tags,favorite,filename,"
-                    "length(filedata) AS filesize,created,updated,deleted_at,project_ids,related_ids," + ",".join(METADATA) + " FROM items WHERE " + condition + " "
+                    "length(filedata) AS filesize,created,updated,deleted_at,project_ids,related_ids,server_ids," + ",".join(METADATA) + " FROM items WHERE " + condition + " "
                     "ORDER BY favorite DESC,updated DESC,id DESC").fetchall()
                 self.reply(200, [{**dict(row), "project_ids": json.loads(row["project_ids"]),
-                                 "related_ids": json.loads(row["related_ids"])} for row in rows])
+                                 "related_ids": json.loads(row["related_ids"]), "server_ids": json.loads(row["server_ids"])} for row in rows])
                 return
             if path == "/api/backup":
                 rows = []
@@ -300,12 +311,16 @@ class Handler(BaseHTTPRequestHandler):
                     item = dict(row)
                     item["project_ids"] = json.loads(item["project_ids"])
                     item["related_ids"] = json.loads(item["related_ids"])
+                    item["server_ids"] = json.loads(item["server_ids"])
                     item["filedata"] = base64.b64encode(item["filedata"]).decode() if item["filedata"] is not None else None
                     rows.append(item)
                 self.reply(200, {"version": 1, "items": rows,
                                 "projects": [dict(row) for row in db.execute("SELECT * FROM projects ORDER BY id")],
-                                "guides": [{**dict(row), "steps": json.loads(row["steps"])}
-                                           for row in db.execute("SELECT * FROM guides ORDER BY id")]},
+                                "guides": [{**dict(row), "steps": json.loads(row["steps"]), "server_ids": json.loads(row["server_ids"])}
+                                           for row in db.execute("SELECT * FROM guides ORDER BY id")],
+                                "servers": [dict(row) for row in db.execute("SELECT * FROM servers ORDER BY id")],
+                                "profiles": [{**dict(row), "variables": json.loads(row["variables"])}
+                                             for row in db.execute("SELECT * FROM profiles ORDER BY id")]},
                            headers={"Content-Disposition": 'attachment; filename="prylbanken-backup.json"'})
                 return
             if path.startswith("/api/files/") and path.removeprefix("/api/files/").isdigit():
@@ -334,7 +349,8 @@ class Handler(BaseHTTPRequestHandler):
     @staticmethod
     def settings(db):
         row = db.execute("SELECT value FROM settings WHERE key='registration_open'").fetchone()
-        return {"registration_open": bool(row and row["value"] == "true")}
+        link = db.execute("SELECT value FROM settings WHERE key='link_check_enabled'").fetchone()
+        return {"registration_open": bool(row and row["value"] == "true"), "link_check_enabled": bool(link and link["value"] == "true")}
 
     def handle_mutation(self, method):
         path = urlsplit(self.path).path
@@ -390,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
                            headers={"Set-Cookie": self.session_cookie("", 0)})
                 return
             with connect() as db:
+                if registry.mutate(self, db, method, path, self.save, snapshot) or linkcheck.mutate(self, db, method, path):
+                    return
                 if workbench.mutate(self, db, method, path):
                     return
                 if self.manage(db, method, path):
@@ -456,6 +474,21 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("Ogiltig säkerhetskopia.")
                     if len(payload["items"]) > 5000:
                         raise ValueError("Högst 5000 poster per import.")
+                    server_map = {}
+                    for table, validator in (("servers", registry.server_payload), ("profiles", registry.profile_payload)):
+                        records = payload.get(table, [])
+                        if not isinstance(records, list) or len(records) + db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] > 200:
+                            raise ValueError("Högst 200 poster per register.")
+                        seen = set()
+                        for record in records:
+                            values = validator(record)
+                            source_id = record.get("id")
+                            if type(source_id) is not int or source_id < 1 or source_id in seen:
+                                raise ValueError("Ogiltigt register-ID i importen.")
+                            seen.add(source_id)
+                            cursor = db.execute(f"INSERT INTO {table}({','.join(values)}) VALUES ({','.join('?' for _ in values)})", list(values.values()))
+                            if table == "servers":
+                                server_map[source_id] = cursor.lastrowid
                     projects = payload.get("projects", [])
                     if not isinstance(projects, list) or len(projects) > 100:
                         raise ValueError("Högst 100 projektsamlingar per import.")
@@ -480,6 +513,10 @@ class Handler(BaseHTTPRequestHandler):
                         if not isinstance(ids, list) or any(type(value) is not int or value not in project_map for value in ids):
                             raise ValueError("Postens projektsamling saknas i importen.")
                         item = {**item, "project_ids": [project_map[value] for value in ids]}
+                        servers = item.get("server_ids", [])
+                        if not isinstance(servers, list) or len(servers) > 100 or any(type(i) is not int or i not in server_map for i in servers):
+                            raise ValueError("Postens server saknas i importfilen.")
+                        item["server_ids"] = sorted(set(server_map[i] for i in servers))
                         key = item.get("example_key")
                         if key is not None and (not isinstance(key, str) or key not in example_keys):
                             raise ValueError("Ogiltig exempelnyckel i säkerhetskopian.")
@@ -526,8 +563,11 @@ class Handler(BaseHTTPRequestHandler):
                             if source_id is not None and source_id not in item_map:
                                 missing_links += 1
                             steps.append({"text": step.get("text"), "item_id": item_map.get(source_id)})
-                        values = workbench.guide_payload(db, {**guide, "steps": steps})
-                        db.execute("INSERT INTO guides(title,description,prerequisites,steps) VALUES (?,?,?,?)",
+                        servers = guide.get("server_ids", [])
+                        if not isinstance(servers, list) or len(servers) > 100 or any(type(i) is not int or i not in server_map for i in servers):
+                            raise ValueError("Guidens server saknas i importfilen.")
+                        values = workbench.guide_payload(db, {**guide, "steps": steps, "server_ids": sorted(set(server_map[i] for i in servers))})
+                        db.execute("INSERT INTO guides(title,description,prerequisites,steps,server_ids) VALUES (?,?,?,?,?)",
                                    tuple(values.values()))
                     audit(db, self.user["username"], "items.import", f"{added} added, {skipped} skipped")
                     db.commit()
@@ -573,11 +613,12 @@ class Handler(BaseHTTPRequestHandler):
         actor = self.user["username"]
         if method == "PUT" and path == "/api/settings":
             payload = self.read_json(8192)
-            if not isinstance(payload, dict) or not isinstance(payload.get("registration_open"), bool):
-                raise ValueError("registration_open måste vara true eller false.")
-            value = payload["registration_open"]
-            db.execute("UPDATE settings SET value=? WHERE key='registration_open'", (json.dumps(value),))
-            audit(db, actor, "settings.registration", "open" if value else "closed")
+            if (not isinstance(payload, dict) or not payload or set(payload) - {"registration_open", "link_check_enabled"} or
+                    any(type(value) is not bool for value in payload.values())):
+                raise ValueError("Inställningar måste vara true eller false.")
+            for key, value in payload.items():
+                db.execute("UPDATE settings SET value=? WHERE key=?", (json.dumps(value), key))
+                audit(db, actor, "settings." + key, "enabled" if value else "disabled")
             db.commit()
             self.reply(200, self.settings(db))
             return True
@@ -868,8 +909,11 @@ class Handler(BaseHTTPRequestHandler):
         old = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone() if item_id is not None else None
         values = validate(payload)
         values.update(metadata(payload, old))
+        if self.user["role"] != "admin" and values["pinned"] != (old["pinned"] if old else "0"):
+            raise ValueError("Endast administratörer kan fästa eller lossa poster.")
         values["project_ids"] = project_ids(db, payload, old, restoring)
         values["related_ids"] = workbench.related_ids(db, payload, old, restoring)
+        values["server_ids"] = registry.server_ids(db, payload, old, restoring)
         if not db.execute("SELECT 1 FROM categories WHERE key=?", (values["category"],)).fetchone():
             # Preserve compatibility with old exports and the legacy custom-category editor.
             db.execute("INSERT INTO categories(key,name) VALUES (?,?)", (values["category"], values["category"]))

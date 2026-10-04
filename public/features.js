@@ -18,7 +18,8 @@ function currentFilters() {
     descendants:$("#filter-descendants").checked, attachments:$("#filter-attachments").checked,
     project:$("#filter-project").value, os:$("#filter-os").value, language:$("#filter-language").value,
     status:$("#filter-status").value, sort:$("#sort").value,
-    personal:$("#filter-personal").checked, review:$("#filter-review").checked};
+    personal:$("#filter-personal").checked, review:$("#filter-review").checked,
+    server:$("#filter-server").value, troubleshooting:$("#filter-troubleshooting").checked};
 }
 function refreshLibraryTools(loadedProjects, loadedSearches) {
   projects = loadedProjects; savedSearches = loadedSearches;
@@ -61,6 +62,7 @@ function appendItemTools(body, item) {
     input.maxLength = 2000; input.autocomplete = "off"; input.spellcheck = false;
     inputs.set(name, input); section.append(labeled(name, input));
   });
+  appendProfilePicker(section, inputs);
   const error = el("p", "error"); error.hidden = true; error.setAttribute("role", "alert");
   const output = document.createElement("textarea");
   output.readOnly = true; output.rows = 8; output.setAttribute("aria-label", "Genererat kommando"); output.spellcheck = false;
@@ -111,6 +113,7 @@ async function showProjects() {
       row.append(action(project.name, "title-button", () => {
         active = "all"; $("#filter-project").value = String(project.id); $("#projects-dialog").close(); render();
       }), el("p", "muted", project.description), exportLink);
+      appendShareButton(row, "project", project.id);
       if (canEdit()) {
         const name = document.createElement("input"); name.value = project.name; name.maxLength = 80;
         const description = document.createElement("textarea"); description.value = project.description; description.maxLength = 2000;
@@ -152,7 +155,8 @@ async function previewFiles(files) {
       const textMode = $("#batch-mode").value === "text" ||
         ($("#batch-mode").value === "auto" && LibraryTools.isText(file.name));
       const candidate = {title:file.name.slice(0,200), category:$("#batch-category").value, content:"",
-        language:LibraryTools.language(file.name), download_name:textMode ? file.name : "", project_ids:[]};
+        language:LibraryTools.language(file.name), download_name:textMode ? file.name : "", project_ids:[],
+        notes:file.webkitRelativePath ? `Importerad från mapp: ${file.webkitRelativePath}` : ""};
       if (textMode) {
         if (file.size > 200000) throw new Error(`${file.name}: kodtext får vara högst 200 kB. Välj Bilagor för större filer.`);
         try { candidate.content = new TextDecoder("utf-8", {fatal:true}).decode(await file.arrayBuffer()); }
@@ -177,6 +181,7 @@ async function previewFiles(files) {
         el("p", result.duplicate ? "duplicate-warning" : "muted", result.duplicate
           ? `Dubblett: ${result.duplicate.title || "samma innehåll i denna import"}. Hoppas över om dubbletter inte tillåts.`
           : candidate.filename ? `Bilaga: ${candidate.filename}` : `Kodtext: ${candidate.language}`));
+      if (candidate.notes) row.append(el("p", "muted", candidate.notes));
       if (!candidate.filename) row.append(codeBlock(candidate.content.slice(0,2000), candidate.language, false, "preview"));
       $("#batch-preview").append(row);
     });
@@ -227,8 +232,9 @@ searchSelect.addEventListener("change", () => {
   if (!selected) return;
   const filters = selected.filters;
   if (!categories.some(category => category[0] === filters.category) ||
-      (filters.project && !projects.some(project => String(project.id) === filters.project))) {
-    showError(new Error("Sökningens kategori eller projekt har tagits bort. Skapa en ny sökning med aktuella filter."));
+      (filters.project && !projects.some(project => String(project.id) === filters.project)) ||
+      (filters.server && !serverRegistry.some(server => String(server.id) === filters.server))) {
+    showError(new Error("Sökningens kategori, projekt eller server har tagits bort. Skapa en ny sökning med aktuella filter."));
     return;
   }
   active = filters.category;
@@ -242,7 +248,8 @@ searchSelect.addEventListener("change", () => {
     input.value = filters[key];
   });
   descendants.checked = filters.descendants; attachmentsOnly.checked = filters.attachments;
-  $("#filter-personal").checked = Boolean(filters.personal); $("#filter-review").checked = Boolean(filters.review); render();
+  $("#filter-personal").checked = Boolean(filters.personal); $("#filter-review").checked = Boolean(filters.review);
+  $("#filter-server").value = filters.server || ""; $("#filter-troubleshooting").checked = Boolean(filters.troubleshooting); render();
 });
 
 const projectButton = action("Projektsamlingar", "secondary", () => { $("#projects-dialog").showModal(); showProjects(); });

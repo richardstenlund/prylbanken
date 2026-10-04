@@ -15,12 +15,14 @@ from pathlib import Path
 from library import fingerprint
 
 DB_LOCK = threading.RLock()
-LANGUAGES = {"plain", "bash", "powershell", "bat", "yaml", "json", "python", "javascript", "sql"}
+LANGUAGES = {"plain", "bash", "powershell", "bat", "yaml", "json", "python", "javascript", "sql", "markdown"}
 METADATA = {
     "language": ("plain", 20), "download_name": ("", 255), "os": ("", 200),
     "program_version": ("", 200), "ports": ("", 1000), "dependencies": ("", 5000),
     "tested_at": ("", 10), "status": ("template", 20),
     "risk": ("unclassified", 20), "review_months": ("6", 3), "reviewed_at": ("", 10),
+    "pinned": ("0", 1), "entry_type": ("standard", 20),
+    "symptoms": ("", 10000), "solution": ("", 10000), "incident_at": ("", 10),
 }
 BUILTINS = {
     "lankar": "Länkar", "kod": "Kodsnuttar", "docker": "Docker",
@@ -31,7 +33,7 @@ BUILTINS = {
     "proxmox": "Proxmox VE",
 }
 ITEM_FIELDS = ("title", "category", "content", "notes", "tags", "favorite", "filename",
-               "filedata", "example_key", "project_ids", "related_ids", *METADATA)
+               "filedata", "example_key", "project_ids", "related_ids", "server_ids", *METADATA)
 
 
 def audit(db, actor, action, target):
@@ -44,6 +46,7 @@ def snapshot(db, item_id, actor):
     data = {field: row[field] for field in ITEM_FIELDS}
     data["project_ids"] = json.loads(data["project_ids"])
     data["related_ids"] = json.loads(data["related_ids"])
+    data["server_ids"] = json.loads(data["server_ids"])
     if data["filedata"] is not None:
         data["filedata"] = base64.b64encode(data["filedata"]).decode("ascii")
     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True)
@@ -57,6 +60,8 @@ def snapshot(db, item_id, actor):
 def migrate(db):
     from workbench import migrate as migrate_workbench
     migrate_workbench(db)
+    from registry import migrate as migrate_registry
+    migrate_registry(db)
     columns = {r["name"] for r in db.execute("PRAGMA table_info(items)")}
     for field, (default, _) in METADATA.items():
         if field not in columns:
@@ -94,6 +99,7 @@ def migrate(db):
     db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
     db.execute("INSERT OR IGNORE INTO settings(key,value) SELECT 'item_sequence',COALESCE(MAX(id),0) FROM items")
     db.execute("INSERT OR IGNORE INTO settings VALUES ('registration_open','true')")
+    db.execute("INSERT OR IGNORE INTO settings VALUES ('link_check_enabled','false')")
     db.execute("INSERT OR IGNORE INTO categories(key,name) VALUES ('proxmox','Proxmox VE')")
     seeded = db.execute("SELECT value FROM settings WHERE key='categories_seeded'").fetchone()
     if not seeded:
@@ -131,9 +137,11 @@ def metadata(payload, old=None):
         raise ValueError("Ogiltig teststatus.")
     if result["risk"] not in {"unclassified", "read", "change", "outage", "destructive"}:
         raise ValueError("Ogiltig riskklass.")
+    if result["pinned"] not in {"0", "1"} or result["entry_type"] not in {"standard", "troubleshooting"}:
+        raise ValueError("Ogiltig fästmarkering eller posttyp.")
     if not re.fullmatch(r"[1-9]\d{0,2}", result["review_months"]) or int(result["review_months"]) > 120:
         raise ValueError("Granskningsintervallet måste vara 1–120 månader.")
-    for field in ("tested_at", "reviewed_at"):
+    for field in ("tested_at", "reviewed_at", "incident_at"):
         date = result[field]
         if date:
             try:

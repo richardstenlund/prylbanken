@@ -37,7 +37,8 @@ och ladda ned bilagor. Begränsa därför öppen registrering till betrodda anv�
   siffror och understreck, börjar med bokstav/understreck och är högst 40 tecken.
   Värden ersätts bokstavligt, utan shell-escaping eller rekursiv ersättning.
   Kontrollera själv citattecken och argument. Variabelvärden sparas inte i
-  databasen, och Prylbanken kör aldrig kommandot.
+  databasen när du fyller i mallen, och Prylbanken kör aldrig kommandot.
+  Sparade miljöprofiler är däremot gemensamma databasposter (se nedan).
   Redigeringsformuläret har färdiga variabelexempel för Docker, SteamCMD och BAT.
 - **Spara från webbläsaren:** dra länken **Spara i Prylbanken** till
   bokmärkesfältet. Klicka på bokmärket på en annan webbsida för att öppna
@@ -105,6 +106,58 @@ Inloggningen använder användarnamn och lösenord, utan tvåfaktor. För den av
 VPN-installationen ska webbporten inte exponeras publikt. Fullständiga SQLite-
 backuper innehåller konton, privata favoriter och avbockningar och måste skyddas.
 Biblioteks-JSON/ZIP innehåller inga konton eller privata markeringar.
+
+### Serververktyg, import och app
+
+- **Serverregister:** spara namn, IP/DNS, OS, funktion och administrationslänk.
+  Koppla servrar till poster och guider, filtrera biblioteket efter server och
+  öppna kopplade guider direkt. Ingen fjärranslutning eller automatisk körning.
+  Ändrade serverkopplingar i en guide nollställer avbockningarna.
+- **Miljöprofiler:** återanvänd IP, portar och sökvägar i mallvariabler.
+  Profiler delas med alla konton och exporteras. Spara **aldrig hemligheter**;
+  namnfilter för lösenord/token/nycklar är bara ett extra skydd, inte en garanti.
+  Högst 200 servrar och 200 profiler, med 1–50 variabler per profil.
+- **Snabbsök:** Ctrl/Cmd+K söker i poster, projekt, guider och servrar.
+- **Duplicera som egen mall:** skapar en fristående redigerbar post med kopierad
+  text, bilaga, metadata och kopplingar, men utan fästmarkering eller tidigare
+  historik. Originalet ändras inte.
+- **Dela intern länk:** direktlänkar till poster, guider, projekt och servrar
+  kräver inloggning. Länken ger inga nya behörigheter; den bevaras vid inloggning.
+- **Markdown:** välj Markdown som språk för rubriker, listor, tabeller, kodblock
+  och HTTP/HTTPS-länkar. HTML körs aldrig. Över 5000 rader visas som originaltext.
+  Kopiering/nedladdning använder originaltexten.
+- **Fäst gemensamt:** administratörer kan prioritera poster överst, oberoende av
+  sortering. Redigerare kan ändra innehållet men inte fästmarkeringen.
+  Import av fästa poster kräver admin; redigerare måste ta bort markeringen i
+  importfilen först. Detta förhindrar att import kringgår behörigheten.
+- **Lagringsöversikt:** administrationen visar databas/WAL, bilagor inklusive
+  papperskorgen, de 20 största filerna och lokal/extern backupstatus.
+  Bilagorna ingår redan i databasstorleken; summorna ska inte adderas.
+- **Valfri länkkontroll:** admin aktiverar funktionen; redigerare kan sedan
+  kontrollera en webblänk manuellt. Endast publika HTTP/HTTPS-adresser på port
+  80/443, högst tre omdirigeringar och tio kontroller/fem minuter per konto.
+  Interna, lokala och blandade DNS-svar nekas, varje anslutning använder en
+  kontrollerad IP och TLS-certifikat valideras. HEAD används utan cookies,
+  inloggningsuppgifter eller nedladdat sidinnehåll. DNS begränsas till tre
+  sekunder och nätkontrollen till åtta; under kontrollen kan andra anrop vänta.
+  Kontroll skickar din hosts IP och länkens URL till webbplatsen; kontrollera
+  därför inte länkar med känsliga parametrar. Ingen automatisk kontroll.
+- **Bokmärkesimport:** välj webbläsarens UTF-8 HTML-export (högst 2 MB/5000
+  länkar), förhandsgranska och importera 1–50 åt gången. Osäkra URL-scheman och
+  inloggningsuppgifter nekas. Identiska länkar hoppas över.
+- **Mappimport:** välj en mapp i Flera filer. Samma gränser och förhandsvisning
+  gäller som för vanlig filimport; källans relativa sökväg sparas i anteckningar.
+- **Felsökningsposter:** strukturerade symptom, lösning och datum med vanliga
+  relationer till kommandon och servrar. Sökningen inkluderar symptom/lösning;
+  server- och felsökningsfilter kan sparas privat.
+- **Installera app:** Prylbanken kan läggas på hemskärmen via webbläsaren.
+  HTTPS (eller localhost) och webbläsarstöd krävs. Appen kräver nät/VPN:
+  service worker lagrar inga sidor eller autentiserade data för offlinebruk.
+
+Serverregister och miljöprofiler följer biblioteks-JSON och full SQLite-backup.
+Server-ID remappas vid JSON-import. Projekt-ZIP innehåller bara de servrar som
+hör till projektets poster, inte profiler eller guider. Serverradering behåller
+poster/guider och deras innehåll, men tar bort aktuella kopplingar.
 
 ### Säkerhetskopiering och återställning
 

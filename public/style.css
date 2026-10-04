@@ -30,3 +30,10 @@ nav{overflow-y:auto;min-height:0;align-content:start}.sidebar .brand,.sidebar-la
 #editor-related { max-height: 240px; overflow: auto; }
 .guide-step { border-bottom: 1px solid var(--border); padding: 12px 0; }
 .guide-step label { white-space: pre-wrap; overflow-wrap: anywhere; }
+.palette-results { display: grid; gap: 8px; max-height: 60vh; overflow: auto; margin-top: 16px; }
+.palette-results button { text-align: left; padding: 12px; overflow-wrap: anywhere; }
+.markdown-view { overflow: auto; overflow-wrap: anywhere; border: 1px solid var(--border); padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+.markdown-view table { border-collapse: collapse; max-width: 100%; }
+.markdown-view th,.markdown-view td { border: 1px solid var(--border); padding: 8px; }
+.markdown-view code { background: var(--bg); color: var(--green); padding: 2px 4px; }
+#bookmarks-import-body article { overflow-wrap: anywhere; }

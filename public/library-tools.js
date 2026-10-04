@@ -15,7 +15,8 @@
       const itemTags = item.tags.toLocaleLowerCase("sv").split(",").map(tag => tag.trim());
       const query = String(filters.query || "").toLocaleLowerCase("sv").trim().split(/\s+/).filter(Boolean);
       const text = [item.title, item.content, item.notes, item.tags, item.filename || "", item.os || "",
-        item.program_version || "", item.ports || "", item.dependencies || "", item.language || ""].join(" ").toLocaleLowerCase("sv");
+        item.program_version || "", item.ports || "", item.dependencies || "", item.language || "",
+        item.symptoms || "", item.solution || "", item.incident_at || ""].join(" ").toLocaleLowerCase("sv");
       const category = filters.category || "all";
       return (category === "all" || (category === "favorites" ? Boolean(item.favorite) :
         category === "filer" ? item.filename !== null || item.category === "filer" : categoryKeys.has(item.category))) &&
@@ -28,7 +29,7 @@
     language(filename) {
       const extension = filename.toLowerCase().split(".").pop();
       return ({sh:"bash", bash:"bash", ps1:"powershell", bat:"bat", cmd:"bat", yaml:"yaml", yml:"yaml",
-        json:"json", py:"python", js:"javascript", mjs:"javascript", sql:"sql"})[extension] || "plain";
+        json:"json", py:"python", js:"javascript", mjs:"javascript", sql:"sql", md:"markdown"})[extension] || "plain";
     },
     isText(filename) {
       return /(?:\.(?:txt|sh|bash|ps1|bat|cmd|ya?ml|json|py|js|mjs|sql|cfg|ini|conf|md|env)$|^Dockerfile$|^\.env$)/i.test(filename);

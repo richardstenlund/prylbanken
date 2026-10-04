@@ -4,12 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#11151d">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <title>Prylbanken – ditt digitala förråd</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/library-tools.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/features.js" defer></script>
   <script src="/workbench.js" defer></script>
+  <script src="/expansion.js" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -18,7 +21,7 @@
     <nav id="navigation" aria-label="Kategorier"></nav>
     <button id="category-manage-button" class="secondary category-manage">Hantera kategorier</button><div class="sidebar-bottom"><span class="status-dot"></span> Lagring på din server<small>En plats för allt som är bra att ha.</small></div>
   </aside>
-  <main>
+  <main inert>
     <header class="topbar"><span>Min samling <span class="crumb">/</span> <span id="breadcrumb">Allt innehåll</span></span><div class="account-actions"><span id="account-name" class="account-badge"></span><button class="secondary" id="trash-button">Papperskorg</button><button class="secondary" id="activity-button">Aktivitet</button><button class="secondary" id="admin-button">Administration</button><button class="secondary" id="users-button">Användare</button><button class="secondary" id="logout-button">Logga ut</button></div></header>
     <section class="page-heading"><div><p class="eyebrow">DITT PERSONLIGA IT-BIBLIOTEK</p><h1 id="page-title">Ditt nästa <span>”bra att ha”.</span></h1><p class="subtitle">Kod, filer och IT-kunskap. Sorterat i dina kategorier, redo när du behöver det.</p></div><button class="primary" id="add-button">＋ Lägg till nytt</button></section>
     <section class="stats" aria-label="Statistik"><div><span class="stat-icon">▦</span><div><strong id="total">0</strong><small>Sparade saker</small></div></div><div><span class="stat-icon purple">⌘</span><div><strong id="commands">0</strong><small>Kod & kommandon</small></div></div><div><span class="stat-icon amber">☆</span><div><strong id="favorites">0</strong><small>Favoriter</small></div></div><div><span class="stat-icon blue">↥</span><div><strong id="files">0</strong><small>Uppladdade filer</small></div></div></section>

@@ -65,7 +65,7 @@ def search_filters(payload):
         if not isinstance(value, str) or len(value) > maximum:
             raise ValueError(f"Ogiltigt sökfilter: {key}.")
         result[key] = value
-    for key in ("descendants", "attachments", "personal", "review"):
+    for key in ("descendants", "attachments", "personal", "review", "troubleshooting"):
         value = payload.get(key, False)
         if not isinstance(value, bool):
             raise ValueError(f"Ogiltigt sökfilter: {key}.")
@@ -74,10 +74,14 @@ def search_filters(payload):
     if not isinstance(project, str) or len(project) > 20 or (project and not project.isdigit()):
         raise ValueError("Ogiltig projektfiltrering.")
     result["project"] = project
+    server = payload.get("server", "")
+    if not isinstance(server, str) or len(server) > 20 or (server and not server.isdigit()):
+        raise ValueError("Ogiltig serverfiltrering.")
+    result["server"] = server
     if result["sort"] not in {"new", "old", "title"}:
         raise ValueError("Ogiltig sortering.")
     if result["status"] not in {"", "template", "tested", "needs-update"}:
         raise ValueError("Ogiltig statusfiltrering.")
-    if result["language"] not in {"", "plain", "bash", "powershell", "bat", "yaml", "json", "python", "javascript", "sql"}:
+    if result["language"] not in {"", "plain", "bash", "powershell", "bat", "yaml", "json", "python", "javascript", "sql", "markdown"}:
         raise ValueError("Ogiltig språkfiltrering.")
     return result

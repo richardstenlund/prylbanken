@@ -300,8 +300,9 @@ async function api(path, method = "GET", body) {
 async function load() {
   $("#error").hidden = true;
   try {
-    const [loadedItems, loadedCategories, loadedProjects, loadedSearches, personal] = await Promise.all([
-      api("/api/items"), api("/api/categories"), api("/api/projects"), api("/api/searches"), api("/api/personal")]);
+    const [loadedItems, loadedCategories, loadedProjects, loadedSearches, personal, servers, profiles, checks] = await Promise.all([
+      api("/api/items"), api("/api/categories"), api("/api/projects"), api("/api/searches"), api("/api/personal"),
+      api("/api/servers"), api("/api/profiles"), api("/api/link-checks")]);
     items = loadedItems;
     categories = builtInCategories.slice(0, 2);
     const categoryData = loadedCategories.filter(category => !["all", "favorites"].includes(category.key)).map(category => {
@@ -315,6 +316,7 @@ async function load() {
     if (!categories.some(category => category[0] === active)) active = "all";
     refreshLibraryTools(loadedProjects, loadedSearches);
     refreshPersonal(personal);
+    refreshExpansion(servers, profiles, checks);
     loading = false; populateFilters(); render();
   }
   catch (error) { showError(error); }
@@ -322,7 +324,9 @@ async function load() {
 function filtered() {
   const filters = currentFilters();
   const keys = filters.descendants ? categoryDescendants(active) : new Set([active]);
-  return items.filter(item => LibraryTools.matches(item, filters, keys) && workbenchMatches(item)).sort((a, b) => {
+  return items.filter(item => LibraryTools.matches(item, filters, keys) && workbenchMatches(item) && expansionMatches(item)).sort((a, b) => {
+    const pinOrder = Number(b.pinned) - Number(a.pinned);
+    if (pinOrder) return pinOrder;
     if ($("#sort").value === "title") return a.title.localeCompare(b.title, "sv");
     const order = a.updated.localeCompare(b.updated) || a.id - b.id;
     return $("#sort").value === "old" ? order : b.favorite - a.favorite || -order;
@@ -505,6 +509,7 @@ function card(item) {
   }
   const metadata = metadataSummary(item);
   if (metadata) node.append(el("p", "metadata-summary", metadata));
+  if (item.pinned === "1") node.append(el("span", "tag", "Fäst av administratör"));
   node.append(riskBadge(item));
   if (item.notes) node.append(el("p", "card-notes", item.notes));
   if (item.filename !== null) node.append(fileLink(item));
@@ -577,6 +582,7 @@ function showDetail(item) {
   $("#detail-category").textContent = categoryName(item.category);
   const body = $("#detail-body");
   body.replaceChildren();
+  if (item.language === "markdown") body.append(renderMarkdown(item.content));
   if (item.content) {
     body.append(codeBlock(item.content, item.language || "plain", true, "detail-code"));
     body.append(action("Kopiera innehåll", "secondary", () => copy(item.content, item)));
@@ -866,10 +872,13 @@ async function boot() {
     const user = await api("/api/me");
     csrf = user.csrf;
     currentUser = user;
+    bookmarkImportButton.hidden = !canEdit();
     $("#account-name").textContent = `${user.username} · ${roleName(user.role)}`;
     applyPermissions();
     await load();
+    $("main").inert = false;
     openCapturedBookmark();
+    await openDeepLink();
   } catch (error) { showError(error); }
 }
 window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });

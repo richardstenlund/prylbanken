@@ -161,7 +161,8 @@ class WorkbenchTests(unittest.TestCase):
         status, body, headers = self.request("GET", "/workbench.js", auth=False)
         self.assertEqual(status, 200)
         self.assertIn("javascript", headers["Content-Type"])
-        self.assertIn(b"boot();", body)
+        self.assertIn(b"makeDialog", body)
+        self.assertIn(b"boot();", self.request("GET", "/expansion.js", auth=False)[1])
         html = self.request("GET", "/login", auth=False)[1]
         self.assertIn(b'id="login-form" method="post"', html)
         self.assertIn(b'id="register-form" method="post"', html)
